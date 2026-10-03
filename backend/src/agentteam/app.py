@@ -8,7 +8,9 @@ def create_app(config: dict | None = None) -> Flask:
     if config:
         app.config.update(config)
 
+    # /health for proxies and load balancers, /api/health for the dashboard.
     @app.get("/health")
+    @app.get("/api/health")
     def health():
         return jsonify(status="ok", version=__version__)
 
