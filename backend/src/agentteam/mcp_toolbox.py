@@ -6,6 +6,7 @@ Least privilege is enforced twice: tools an agent may not use are never shown to
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from collections.abc import Callable
@@ -72,7 +73,29 @@ class ToolResult:
 
 def _result_text(result: types.CallToolResult) -> str:
     parts = [c.text for c in result.content if isinstance(c, types.TextContent)]
-    return "\n".join(parts) if parts else str(result.structuredContent or "")
+    if parts:
+        return "\n".join(parts)
+    structured = result.structuredContent
+    if isinstance(structured, dict) and set(structured) == {"result"}:
+        structured = structured["result"]  # FastMCP wraps bare lists/values as {"result": ...}
+    return json.dumps(structured) if structured is not None else ""
+
+
+def coerce_args(schema: dict[str, Any] | None, args: dict[str, Any]) -> dict[str, Any]:
+    """Small models sometimes send arrays/objects as JSON-encoded strings. Decode those
+    when the tool's schema says the argument should be an array or object."""
+    properties = (schema or {}).get("properties", {})
+    fixed = dict(args)
+    for key, value in args.items():
+        expected = properties.get(key, {}).get("type")
+        if isinstance(value, str) and expected in ("array", "object"):
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                continue
+            if isinstance(parsed, list if expected == "array" else dict):
+                fixed[key] = parsed
+    return fixed
 
 
 _PASSTHROUGH_EXACT = {"PYTHONPATH", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"}
@@ -145,13 +168,20 @@ class Toolbox:
             with self.tracer.span(
                 f"mcp.{spec.name}.{tool.name}", kind="mcp", input=args, stacklevel=1
             ) as span:
+                call_args = coerce_args(tool.inputSchema, args)
                 if spec.guard is not None:
-                    spec.guard(tool.name, args)
+                    spec.guard(tool.name, call_args)
                 result = await self._sessions[spec.name].call_tool(
-                    tool.name, args, read_timeout_seconds=CALL_TIMEOUT
+                    tool.name, call_args, read_timeout_seconds=CALL_TIMEOUT
                 )
                 text = _result_text(result)
-                span.set_output({"is_error": bool(result.isError), "text": text})
+                span.set_output(
+                    {
+                        "is_error": bool(result.isError),
+                        "text": text,
+                        "arguments_coerced": call_args != args,
+                    }
+                )
                 return ToolResult(text, bool(result.isError))
         except ToolNotAllowed as exc:  # recorded as an error span, reported back to the model
             return ToolResult(str(exc), True)

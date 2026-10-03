@@ -2,7 +2,14 @@ import asyncio
 import sys
 
 from agentteam.db import connect
-from agentteam.mcp_toolbox import ServerSpec, Toolbox, forbid_git_paths, only, read_only
+from agentteam.mcp_toolbox import (
+    ServerSpec,
+    Toolbox,
+    coerce_args,
+    forbid_git_paths,
+    only,
+    read_only,
+)
 from agentteam.workspace import collect_patch, create_workspace, remove_workspace
 
 from .conftest import needs_npx
@@ -25,6 +32,44 @@ def span_rows(db_path):
         conn.close()
 
 
+def test_coerce_args_decodes_stringified_arrays_and_objects():
+    schema = {
+        "properties": {
+            "edits": {"type": "array"},
+            "opts": {"type": "object"},
+            "path": {"type": "string"},
+        }
+    }
+    out = coerce_args(
+        schema, {"edits": '[{"a": 1}]', "opts": '{"b": 2}', "path": '["not", "touched"]'}
+    )
+    assert out == {"edits": [{"a": 1}], "opts": {"b": 2}, "path": '["not", "touched"]'}
+    # Invalid JSON, or JSON of the wrong shape, is left alone for the server to reject.
+    assert coerce_args(schema, {"edits": "[oops"}) == {"edits": "[oops"}
+    assert coerce_args(schema, {"edits": '{"a": 1}'}) == {"edits": '{"a": 1}'}
+
+
+def test_docs_server_skips_hidden_dirs_and_searches_code(tracer, toy_repo):
+    (toy_repo / ".pytest_cache").mkdir()
+    (toy_repo / ".pytest_cache" / "README.md").write_text("cache readme")
+
+    async def main():
+        run_id = tracer.create_run("t")
+        with tracer.run(run_id):
+            async with Toolbox(tracer, [docs_spec(toy_repo)]) as tb:
+                names = {d["name"] for d in tb.definitions()}
+                listing = await tb.call("docs__list_docs", {})
+                code = await tb.call("docs__search_code", {"query": "print"})
+                nothing = await tb.call("docs__search_docs", {"query": "zzzz-no-match"})
+        return names, listing, code, nothing
+
+    names, listing, code, nothing = asyncio.run(main())
+    assert "docs__search_code" in names
+    assert ".pytest_cache" not in listing.text
+    assert "app.py" in code.text
+    assert nothing.text == "[]"  # clean JSON, not a Python repr
+
+
 def test_docs_server_is_read_only_and_scoped(tracer, toy_repo, db_path):
     async def main():
         run_id = tracer.create_run("t")
@@ -40,7 +85,12 @@ def test_docs_server_is_read_only_and_scoped(tracer, toy_repo, db_path):
         return names, listing, found, doc, escape, code, unknown
 
     names, listing, found, doc, escape, code, unknown = asyncio.run(main())
-    assert names == {"docs__list_docs", "docs__search_docs", "docs__read_doc"}
+    assert names == {
+        "docs__list_docs",
+        "docs__search_docs",
+        "docs__search_code",
+        "docs__read_doc",
+    }
     assert "docs/guide.md" in listing.text and "README.md" in listing.text
     assert "guide.md" in found.text
     assert "Routes live in app.py" in doc.text

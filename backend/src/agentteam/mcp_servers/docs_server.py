@@ -12,7 +12,8 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 DOC_SUFFIXES = {".md", ".rst", ".txt"}
-SKIP_DIRS = {".git", "node_modules", ".venv", "__pycache__", "dist"}
+CODE_SUFFIXES = {".py", ".toml", ".yml", ".yaml", ".json", ".js", ".ts", ".tsx", ".cfg", ".ini"}
+SKIP_DIRS = {"node_modules", "__pycache__", "dist", "build", "venv"}
 MAX_DOC_CHARS = 100_000
 
 
@@ -21,17 +22,35 @@ def build_server(root: Path) -> FastMCP:
     mcp = FastMCP("docs")
     read_only = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
 
-    def iter_docs() -> Iterator[Path]:
+    def iter_files(suffixes: set[str]) -> Iterator[Path]:
         for path in sorted(root.rglob("*")):
+            parts = path.relative_to(root).parts
+            hidden = any(part.startswith(".") for part in parts[:-1])  # .git, .pytest_cache, ...
             if (
                 path.is_file()
-                and path.suffix.lower() in DOC_SUFFIXES
-                and not SKIP_DIRS.intersection(path.relative_to(root).parts)
+                and path.suffix.lower() in suffixes
+                and not hidden
+                and not SKIP_DIRS.intersection(parts)
             ):
                 yield path
 
+    def iter_docs() -> Iterator[Path]:
+        return iter_files(DOC_SUFFIXES)
+
     def rel(path: Path) -> str:
         return path.relative_to(root).as_posix()
+
+    def grep(paths: Iterator[Path], query: str, max_results: int) -> list[dict]:
+        needle = query.lower()
+        hits: list[dict] = []
+        for path in paths:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for number, line in enumerate(text.splitlines(), 1):
+                if needle in line.lower():
+                    hits.append({"path": rel(path), "line": number, "text": line.strip()[:300]})
+                    if len(hits) >= max_results:
+                        return hits
+        return hits
 
     @mcp.tool(annotations=read_only)
     def list_docs() -> list[str]:
@@ -41,17 +60,13 @@ def build_server(root: Path) -> FastMCP:
     @mcp.tool(annotations=read_only)
     def search_docs(query: str, max_results: int = 10) -> list[dict]:
         """Case-insensitive text search across docs. Returns path, line number and line text."""
-        needle = query.lower()
-        hits: list[dict] = []
-        for path in iter_docs():
-            for number, line in enumerate(
-                path.read_text(encoding="utf-8", errors="replace").splitlines(), 1
-            ):
-                if needle in line.lower():
-                    hits.append({"path": rel(path), "line": number, "text": line.strip()[:300]})
-                    if len(hits) >= max_results:
-                        return hits
-        return hits
+        return grep(iter_docs(), query, max_results)
+
+    @mcp.tool(annotations=read_only)
+    def search_code(query: str, max_results: int = 10) -> list[dict]:
+        """Case-insensitive search across source and config files. Returns matching lines only
+        (path, line number, text); use it to locate where code lives, not to read whole files."""
+        return grep(iter_files(CODE_SUFFIXES), query, max_results)
 
     @mcp.tool(annotations=read_only)
     def read_doc(path: str) -> str:
