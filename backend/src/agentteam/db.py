@@ -1,0 +1,95 @@
+"""SQLite access: WAL mode, short-lived connections, append-only events table."""
+
+import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS runs (
+    id             TEXT PRIMARY KEY,
+    task           TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'pending',
+    config_hash    TEXT,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL,
+    total_cost_usd REAL NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS spans (
+    id            TEXT PRIMARY KEY,
+    run_id        TEXT NOT NULL REFERENCES runs(id),
+    parent_id     TEXT,
+    name          TEXT NOT NULL,
+    kind          TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'running',
+    started_at    TEXT NOT NULL,
+    ended_at      TEXT,
+    duration_ms   REAL,
+    input         TEXT,
+    output        TEXT,
+    error         TEXT,
+    traceback     TEXT,
+    callsite_file TEXT,
+    callsite_line INTEGER,
+    model         TEXT,
+    input_tokens  INTEGER,
+    output_tokens INTEGER,
+    cost_usd      REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_spans_run ON spans(run_id);
+
+-- Append-only log. The autoincrement id doubles as the SSE Last-Event-ID.
+CREATE TABLE IF NOT EXISTS events (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id  TEXT NOT NULL,
+    span_id TEXT,
+    type    TEXT NOT NULL,
+    ts      TEXT NOT NULL,
+    data    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id, id);
+
+CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events
+BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events
+BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
+"""
+
+
+def connect(path: str | Path) -> sqlite3.Connection:
+    p = str(path)
+    if p != ":memory:":
+        Path(p).parent.mkdir(parents=True, exist_ok=True)
+    # isolation_level=None: autocommit, transactions are managed explicitly.
+    conn = sqlite3.connect(p, timeout=5.0, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+def init_db(path: str | Path) -> None:
+    conn = connect(path)
+    try:
+        conn.executescript(SCHEMA)
+    finally:
+        conn.close()
+
+
+@contextmanager
+def write_tx(path: str | Path) -> Iterator[sqlite3.Connection]:
+    """One writer transaction. BEGIN IMMEDIATE takes the write lock up front."""
+    conn = connect(path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        yield conn
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
