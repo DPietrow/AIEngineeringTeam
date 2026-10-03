@@ -1,0 +1,75 @@
+"""Per-run isolated workspace: a git worktree of the toy repo on its own branch.
+
+Agents never touch the real checkout. The worktree is where Implementation writes and
+(later) where tests run; the resulting commit is the patch.
+"""
+
+import os
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+
+BOT_NAME = "agentteam-bot"
+BOT_EMAIL = "agentteam-bot@users.noreply.github.com"
+
+
+class GitError(RuntimeError):
+    pass
+
+
+@dataclass
+class Workspace:
+    repo: Path
+    path: Path
+    branch: str
+    base_commit: str
+
+
+def _git(cwd: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+    )
+    if result.returncode != 0:
+        raise GitError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
+    return result.stdout
+
+
+def create_workspace(
+    repo: Path, workspaces_dir: Path, run_id: str, base_ref: str = "main"
+) -> Workspace:
+    repo = repo.resolve()
+    short = run_id[:12]
+    path = (workspaces_dir / short).resolve()
+    branch = f"agent/{short}"
+    base_commit = _git(repo, "rev-parse", base_ref).strip()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _git(repo, "worktree", "add", "-b", branch, str(path), base_commit)
+    return Workspace(repo=repo, path=path, branch=branch, base_commit=base_commit)
+
+
+def collect_patch(ws: Workspace, message: str) -> tuple[str, list[str]]:
+    """Commit everything the agent changed. Returns (unified diff vs base, changed files)."""
+    _git(ws.path, "add", "-A")
+    files = [f for f in _git(ws.path, "diff", "--cached", "--name-only").splitlines() if f]
+    if not files:
+        return "", []
+    _git(
+        ws.path,
+        "-c",
+        f"user.name={BOT_NAME}",
+        "-c",
+        f"user.email={BOT_EMAIL}",
+        "commit",
+        "-m",
+        message,
+    )
+    return _git(ws.path, "diff", ws.base_commit, "HEAD"), files
+
+
+def remove_workspace(ws: Workspace) -> None:
+    _git(ws.repo, "worktree", "remove", "--force", str(ws.path))

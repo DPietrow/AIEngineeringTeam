@@ -16,6 +16,7 @@ node_modules/
 frontend/dist/
 
 # Local data (SQLite, run workspaces, eval output)
+backend/data/
 *.db
 *.db-shm
 *.db-wal

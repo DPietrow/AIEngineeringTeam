@@ -58,7 +58,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     settings = Settings.from_env()
     tracer = build_tracer(settings)
-    orchestrator = Orchestrator(tracer, build_llm(tracer, settings))
+    orchestrator = Orchestrator(tracer, build_llm(tracer, settings), settings)
     log.info(
         "worker ready (db=%s, config=%s)", settings.database_path, config_hash(settings.llm_model)
     )

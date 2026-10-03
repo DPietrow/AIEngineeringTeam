@@ -1,21 +1,26 @@
+import dataclasses
 import json
+import subprocess
 
 import pytest
 
+from agentteam.agent_loop import StepLimitExceeded
 from agentteam.agents.architect import Architect
 from agentteam.api import stream_events
 from agentteam.app import create_app
 from agentteam.db import connect
-from agentteam.llm import FakeLLM
+from agentteam.llm import FakeLLM, _tool_turn
 from agentteam.orchestrator import Orchestrator
 from agentteam.prompts import config_hash
-from agentteam.tracing import set_tracer
+from agentteam.tracing import NoActiveRun, set_tracer
 from agentteam.worker import work_once
+
+from .conftest import needs_npx
 
 
 @pytest.fixture
-def app(tmp_path):
-    return create_app({"TESTING": True, "DATABASE_PATH": str(tmp_path / "app.db")})
+def app(settings):
+    return create_app({"TESTING": True, "DATABASE_PATH": settings.database_path})
 
 
 @pytest.fixture
@@ -35,6 +40,26 @@ def parse_sse(frames):
     return out
 
 
+def run_status(app, run_id):
+    conn = connect(app.config["DATABASE_PATH"])
+    try:
+        return dict(conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone())
+    finally:
+        conn.close()
+
+
+def submit(summary="s"):
+    return _tool_turn(
+        "submit",
+        "submit_design_spec",
+        {
+            "summary": summary,
+            "changes": [{"path": "app.py", "action": "modify", "description": "d"}],
+            "acceptance_criteria": ["ok"],
+        },
+    )
+
+
 def test_post_runs_validates_input(app):
     client = app.test_client()
     assert client.post("/api/runs", json={}).status_code == 400
@@ -42,43 +67,131 @@ def test_post_runs_validates_input(app):
     assert client.post("/api/runs", json={"task": "x" * 6000}).status_code == 400
 
 
-def test_end_to_end_run_produces_spec_and_trace(app, tracer):
+@needs_npx
+def test_end_to_end_run_produces_spec_patch_and_trace(app, tracer, settings, toy_repo):
     client = app.test_client()
-    res = client.post("/api/runs", json={"task": "Add a /ping endpoint"})
+    res = client.post("/api/runs", json={"task": "Add a notes file"})
     assert res.status_code == 202
     run_id = res.get_json()["id"]
 
-    assert work_once(tracer, Orchestrator(tracer, FakeLLM(tracer))) is True
-    assert work_once(tracer, Orchestrator(tracer, FakeLLM(tracer))) is False  # queue drained
+    orchestrator = Orchestrator(tracer, FakeLLM(tracer), settings)
+    assert work_once(tracer, orchestrator) is True
+    assert work_once(tracer, orchestrator) is False  # queue drained
 
     detail = client.get(f"/api/runs/{run_id}").get_json()
-    assert detail["run"]["status"] == "done"
+    assert detail["run"]["status"] == "done", detail["run"]
     assert detail["run"]["config_hash"] == config_hash(app.config["LLM_MODEL"])
     names = [s["name"] for s in detail["spans"]]
-    assert names == ["run", "architect", "llm.design_spec"]
-    assert detail["artifacts"][0]["artifact"] == "design_spec"
-    assert detail["artifacts"][0]["data"]["changes"][0]["path"] == "src/example.py"
+    assert names == [
+        "run",
+        "architect",
+        "llm.architect.step1",
+        "workspace.create",
+        "implementation",
+        "llm.implementation.step1",
+        "mcp.filesystem.write_file",
+        "llm.implementation.step2",
+    ]
+    assert [a["artifact"] for a in detail["artifacts"]] == ["design_spec", "patch"]
 
-    llm_span = detail["spans"][2]
-    assert llm_span["kind"] == "llm"
-    assert llm_span["cost_usd"] == 0  # fake LLM is free
-    assert detail["run"]["total_cost_usd"] == 0
-    assert llm_span["input"]["user"].startswith("Task:")
-    # call-site is attributed to the Architect, not the LLM helper
-    assert llm_span["callsite_file"].endswith("architect.py")
+    patch = detail["artifacts"][1]["data"]
+    assert patch["files_changed"] == ["AGENT_NOTES.md"]
+    assert "AGENT_NOTES.md" in patch["diff"]
+    assert detail["run"]["total_cost_usd"] == 0  # fake LLM is free
+
+    # The change lives on its own branch of the toy repo; main is untouched.
+    branches = subprocess.run(
+        ["git", "branch", "--list", "agent/*"], cwd=toy_repo, capture_output=True, text=True
+    ).stdout
+    assert patch["branch"] in branches
+    assert not (toy_repo / "AGENT_NOTES.md").exists()
+
+    llm_span = next(s for s in detail["spans"] if s["name"] == "llm.implementation.step1")
+    assert llm_span["callsite_file"].endswith("agent_loop.py")  # not llm.py
+
+
+def test_architect_reads_docs_through_mcp(app, tracer, toy_repo):
+    def script(name, system, messages, tools):
+        if sum(1 for m in messages if m["role"] == "assistant") == 0:
+            assert "docs__read_doc" in {t["name"] for t in tools}
+            assert not any(t["name"].startswith("filesystem") for t in tools)
+            return _tool_turn("t1", "docs__list_docs", {})
+        listing = messages[-1]["content"][0]["content"]
+        assert "docs/guide.md" in listing
+        return submit("from docs")
+
+    run_id = tracer.create_run("task")
+    with tracer.run(run_id):
+        spec = Architect(FakeLLM(tracer, script=script), tracer, toy_repo).design(run_id, "task")
+    assert spec.summary == "from docs"
+
+    conn = connect(app.config["DATABASE_PATH"])
+    try:
+        names = [r[0] for r in conn.execute("SELECT name FROM spans ORDER BY started_at")]
+    finally:
+        conn.close()
+    assert "mcp.docs.list_docs" in names
+
+
+def test_step_limit_marks_run_error(app, tracer, settings):
+    def loop_forever(name, system, messages, tools):
+        return _tool_turn(f"t{len(messages)}", "docs__list_docs", {})
+
+    tight = dataclasses.replace(settings, max_architect_steps=2)
+    run_id = tracer.create_run("task")
+    tracer.claim_next_run()
+    Orchestrator(tracer, FakeLLM(tracer, script=loop_forever), tight).execute(run_id, "task")
+
+    run = run_status(app, run_id)
+    assert run["status"] == "error"
+    events = [
+        e["type"] for e in connect(app.config["DATABASE_PATH"]).execute("SELECT type FROM events")
+    ]
+    assert "agent.step_limit" in events
+    assert StepLimitExceeded.__name__ in json.dumps(
+        [dict(r) for r in connect(app.config["DATABASE_PATH"]).execute("SELECT data FROM events")]
+    )
+
+
+def test_missing_toy_repo_marks_run_error(app, tracer, settings):
+    broken = dataclasses.replace(settings, toy_repo_path=None)
+    run_id = tracer.create_run("task")
+    tracer.claim_next_run()
+    Orchestrator(tracer, FakeLLM(tracer), broken).execute(run_id, "task")
+    assert run_status(app, run_id)["status"] == "error"
+
+
+def test_llm_failure_marks_run_error(app, tracer, settings):
+    class Boom(FakeLLM):
+        def _converse(self, *a, **k):
+            raise RuntimeError("api down")
+
+    run_id = tracer.create_run("task")
+    tracer.claim_next_run()
+    Orchestrator(tracer, Boom(tracer), settings).execute(run_id, "task")
+
+    conn = connect(app.config["DATABASE_PATH"])
+    try:
+        failed = conn.execute("SELECT name FROM spans WHERE status = 'error'").fetchall()
+    finally:
+        conn.close()
+    assert run_status(app, run_id)["status"] == "error"
+    assert {r[0] for r in failed} == {"run", "architect", "llm.architect.step1"}
 
 
 def test_sse_stream_replays_and_resumes(app, tracer):
     run_id = tracer.create_run("task")
     tracer.claim_next_run()
-    Orchestrator(tracer, FakeLLM(tracer)).execute(run_id, "task")
+    with tracer.run(run_id), tracer.span("work"):
+        tracer.emit("artifact.created", {"artifact": "x"})
+    tracer.set_run_status(run_id, "done")
     db = app.config["DATABASE_PATH"]
 
     events = parse_sse(stream_events(db, run_id, 0, poll_interval=0.01))
     types = [e[1] for e in events]
     assert types[0] == "run.created"
     assert types[-1] == "end"
-    assert "span.start" in types and "span.end" in types and "artifact.created" in types
+    assert {"span.start", "span.end", "artifact.created"} <= set(types)
 
     ids = [int(e[0]) for e in events if e[0]]
     assert ids == sorted(ids)
@@ -107,27 +220,6 @@ def test_claim_is_exclusive(tracer):
     assert tracer.claim_next_run() is None
 
 
-def test_llm_failure_marks_run_error(app, tracer):
-    class Boom(FakeLLM):
-        def _call(self, *a, **k):
-            raise RuntimeError("api down")
-
-    run_id = tracer.create_run("task")
-    tracer.claim_next_run()
-    Orchestrator(tracer, Boom(tracer)).execute(run_id, "task")
-
-    conn = connect(app.config["DATABASE_PATH"])
-    try:
-        status = conn.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()[0]
-        failed = conn.execute("SELECT name FROM spans WHERE status = 'error'").fetchall()
-    finally:
-        conn.close()
-    assert status == "error"
-    assert {r[0] for r in failed} == {"run", "architect", "llm.design_spec"}
-
-
-def test_architect_requires_a_run(tracer):
-    from agentteam.tracing import NoActiveRun
-
+def test_architect_requires_a_run(tracer, toy_repo):
     with pytest.raises(NoActiveRun):
-        Architect(FakeLLM(tracer)).design("r", "task")
+        Architect(FakeLLM(tracer), tracer, toy_repo).design("r", "task")
