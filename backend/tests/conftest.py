@@ -38,6 +38,8 @@ def toy_repo(tmp_path):
     (repo / "README.md").write_text("# Toy\nA tiny Flask app.\n")
     (repo / "docs" / "guide.md").write_text("# Guide\nRoutes live in app.py. Run pytest to test.\n")
     (repo / "app.py").write_text("print('hi')\n")
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_ok.py").write_text("def test_ok():\n    assert True\n")
     git(repo, "init", "-b", "main")
     git(repo, "add", "-A")
     git(repo, "commit", "-m", "init")
@@ -50,4 +52,6 @@ def settings(tmp_path, toy_repo):
         database_path=str(tmp_path / "app.db"),
         toy_repo_path=str(toy_repo),
         workspaces_dir=str(tmp_path / "workspaces"),
+        sandbox_mode="local",  # no Docker in tests
+        sandbox_timeout_s=60,
     )

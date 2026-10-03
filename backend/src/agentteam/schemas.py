@@ -61,6 +61,19 @@ class Patch(Artifact):
 # --- Testing -> test report ---------------------------------------------------
 
 
+class CommandRun(BaseModel):
+    """One sandboxed command the Testing agent ran. Recorded from real exit codes, never
+    from what the model says happened."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    command: str
+    exit_code: int
+    duration_s: float = Field(ge=0)
+    timed_out: bool = False
+    output_tail: str = ""
+
+
 class TestFailure(BaseModel):
     __test__ = False  # not a pytest class
     model_config = ConfigDict(extra="forbid")
@@ -73,13 +86,11 @@ class TestReport(Artifact):
     __test__ = False  # not a pytest class
 
     passed: bool
-    command: str
-    exit_code: int
-    duration_s: float = Field(ge=0)
-    timed_out: bool = False
+    runs: list[CommandRun] = Field(default_factory=list)
+    missing_checks: list[str] = Field(default_factory=list)
     tests_run: int = Field(default=0, ge=0)
     failures: list[TestFailure] = Field(default_factory=list)
-    output_tail: str = ""
+    summary: str = ""
 
 
 # --- Review -> verdict --------------------------------------------------------
@@ -94,10 +105,18 @@ class ReviewComment(BaseModel):
     message: str
 
 
-class Verdict(Artifact):
+class VerdictBody(BaseModel):
+    """The part of a verdict the model writes (also its tool-call schema)."""
+
+    model_config = ConfigDict(extra="forbid")
+
     decision: Literal["approved", "changes_requested"]
     summary: str
     comments: list[ReviewComment] = Field(default_factory=list)
+
+
+class Verdict(Artifact, VerdictBody):
+    pass
 
 
 # --- Delivery -> pull request -------------------------------------------------

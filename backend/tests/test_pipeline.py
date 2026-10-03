@@ -91,8 +91,23 @@ def test_end_to_end_run_produces_spec_patch_and_trace(app, tracer, settings, toy
         "llm.implementation.step1",
         "mcp.filesystem.write_file",
         "llm.implementation.step2",
+        "testing",
+        "llm.testing.step1",
+        "mcp.terminal.run_command",
+        "llm.testing.step2",
+        "mcp.terminal.run_command",
+        "llm.testing.step3",
+        "review",
+        "llm.review.step1",
     ]
-    assert [a["artifact"] for a in detail["artifacts"]] == ["design_spec", "patch"]
+    assert [a["artifact"] for a in detail["artifacts"]] == [
+        "design_spec",
+        "patch",
+        "test_report",
+        "verdict",
+    ]
+    assert detail["artifacts"][2]["data"]["passed"] is True
+    assert detail["artifacts"][3]["data"]["decision"] == "approved"
 
     patch = detail["artifacts"][1]["data"]
     assert patch["files_changed"] == ["AGENT_NOTES.md"]

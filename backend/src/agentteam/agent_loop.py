@@ -1,11 +1,14 @@
 """Generic tool-use loop with a hard step cap. Used by every tool-using agent."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from .llm import LLM
-from .mcp_toolbox import MAX_RESULT_CHARS_FOR_LLM, Toolbox
+from .mcp_toolbox import MAX_RESULT_CHARS_FOR_LLM, Toolbox, ToolResult
 from .tracing import Tracer
+
+ToolResultHook = Callable[[str, dict[str, Any], ToolResult], None]
 
 
 class StepLimitExceeded(RuntimeError):
@@ -42,10 +45,13 @@ async def run_agent_loop(
     toolbox: Toolbox,
     max_steps: int,
     submit_tool: dict[str, Any] | None = None,
+    on_tool_result: ToolResultHook | None = None,
 ) -> LoopResult:
     """Drive model turns until it stops calling tools (or calls the submit tool).
 
     submit_tool is a client-side tool whose input is the agent's structured result.
+    on_tool_result sees every real tool result, so callers can record facts (exit codes)
+    instead of trusting what the model claims.
     """
     tools = toolbox.definitions() + ([submit_tool] if submit_tool else [])
     messages: list[dict[str, Any]] = [{"role": "user", "content": user}]
@@ -81,6 +87,8 @@ async def run_agent_loop(
         results = []
         for call in turn.tool_calls:
             res = await toolbox.call(call.name, call.input)
+            if on_tool_result is not None:
+                on_tool_result(call.name, call.input, res)
             results.append(
                 {
                     "type": "tool_result",

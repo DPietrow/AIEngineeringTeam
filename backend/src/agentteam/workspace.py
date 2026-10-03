@@ -53,21 +53,25 @@ def create_workspace(
 
 
 def collect_patch(ws: Workspace, message: str) -> tuple[str, list[str]]:
-    """Commit everything the agent changed. Returns (unified diff vs base, changed files)."""
+    """Commit anything new the agent changed, then return the CUMULATIVE patch vs the base
+    commit as (unified diff, changed files). Safe to call after every attempt."""
     _git(ws.path, "add", "-A")
-    files = [f for f in _git(ws.path, "diff", "--cached", "--name-only").splitlines() if f]
+    if _git(ws.path, "diff", "--cached", "--name-only").strip():
+        _git(
+            ws.path,
+            "-c",
+            f"user.name={BOT_NAME}",
+            "-c",
+            f"user.email={BOT_EMAIL}",
+            "commit",
+            "-m",
+            message,
+        )
+    files = [
+        f for f in _git(ws.path, "diff", "--name-only", ws.base_commit, "HEAD").splitlines() if f
+    ]
     if not files:
         return "", []
-    _git(
-        ws.path,
-        "-c",
-        f"user.name={BOT_NAME}",
-        "-c",
-        f"user.email={BOT_EMAIL}",
-        "commit",
-        "-m",
-        message,
-    )
     return _git(ws.path, "diff", ws.base_commit, "HEAD"), files
 
 

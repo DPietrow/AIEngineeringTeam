@@ -13,7 +13,8 @@ from .tracing import Tracer
 
 bp = Blueprint("api", __name__, url_prefix="/api")
 
-TERMINAL_STATUSES = {"done", "error", "stopped"}
+# done: approved. failed: a retry cap was hit. error: crashed. stopped: spend cap.
+TERMINAL_STATUSES = {"done", "failed", "error", "stopped"}
 MAX_TASK_CHARS = 5000
 
 

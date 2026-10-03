@@ -4,7 +4,7 @@ from ..agent_loop import AgentError, run_agent_loop
 from ..llm import LLM
 from ..mcp_toolbox import ServerSpec, Toolbox, forbid_git_paths, only
 from ..prompts import load_prompt
-from ..schemas import DesignSpec, Patch
+from ..schemas import DesignSpec, Patch, TestReport, Verdict
 from ..tracing import Tracer, traced
 from ..workspace import Workspace, collect_patch
 
@@ -22,8 +22,22 @@ FILESYSTEM_TOOLS = (
 )
 
 
+def _feedback_text(feedback: TestReport | Verdict) -> str:
+    if isinstance(feedback, TestReport):
+        return (
+            "Your previous attempt FAILED automated checks. Fix the problems below, then stop.\n"
+            f"Test report:\n{feedback.model_dump_json(indent=2, exclude={'run_id', 'created_at'})}"
+        )
+    return (
+        "A reviewer requested changes to your previous attempt. Address every blocker and major "
+        "comment, then stop.\n"
+        f"Review:\n{feedback.model_dump_json(indent=2, exclude={'run_id', 'created_at'})}"
+    )
+
+
 class Implementation:
-    """Design spec in, committed patch on a workspace branch out."""
+    """Design spec in, committed patch on a workspace branch out. Re-runs with feedback when
+    tests fail or the reviewer asks for changes."""
 
     def __init__(self, llm: LLM, tracer: Tracer, max_steps: int = 20) -> None:
         self.llm = llm
@@ -31,20 +45,30 @@ class Implementation:
         self.max_steps = max_steps
 
     @traced("implementation", kind="agent")
-    def implement(self, run_id: str, spec: DesignSpec, workspace: Workspace) -> Patch:
-        summary = asyncio.run(self._implement(spec, workspace))
-        diff, files = collect_patch(workspace, f"agent: {spec.summary[:60]}")
+    def implement(
+        self,
+        run_id: str,
+        spec: DesignSpec,
+        workspace: Workspace,
+        attempt: int = 1,
+        feedback: TestReport | Verdict | None = None,
+    ) -> Patch:
+        summary = asyncio.run(self._implement(spec, workspace, feedback))
+        diff, files = collect_patch(workspace, f"agent (attempt {attempt}): {spec.summary[:60]}")
         if not files:
-            raise AgentError("implementation finished without changing any files")
+            raise AgentError("implementation produced no changes")
         return Patch(
             run_id=run_id,
             branch=workspace.branch,
             diff=diff,
             files_changed=files,
             rationale=summary,
+            attempt=attempt,
         )
 
-    async def _implement(self, spec: DesignSpec, workspace: Workspace) -> str:
+    async def _implement(
+        self, spec: DesignSpec, workspace: Workspace, feedback: TestReport | Verdict | None
+    ) -> str:
         filesystem = ServerSpec(
             name="filesystem",
             command="npx",
@@ -53,13 +77,16 @@ class Implementation:
             guard=forbid_git_paths,
         )
         system = load_prompt("implementation").replace("{{workspace}}", str(workspace.path))
+        user = f"Design spec:\n{spec.model_dump_json(indent=2, exclude={'run_id', 'created_at'})}"
+        if feedback is not None:
+            user += f"\n\n{_feedback_text(feedback)}"
         async with Toolbox(self.tracer, [filesystem]) as toolbox:
             result = await run_agent_loop(
                 llm=self.llm,
                 tracer=self.tracer,
                 name="implementation",
                 system=system,
-                user=f"Design spec:\n{spec.model_dump_json(indent=2)}",
+                user=user,
                 toolbox=toolbox,
                 max_steps=self.max_steps,
             )

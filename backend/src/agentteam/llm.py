@@ -253,4 +253,16 @@ class FakeLLM(LLM):
                     {"path": path, "content": "# Agent notes\n\nWritten by the fake LLM.\n"},
                 )
             return _text_turn("Done (fake LLM): created AGENT_NOTES.md.")
+        if agent == "testing":
+            if assistant_turns == 0:
+                return _tool_turn("fake-pytest", "terminal__run_command", {"command": "pytest -q"})
+            if assistant_turns == 1:
+                return _tool_turn("fake-ruff", "terminal__run_command", {"command": "ruff check ."})
+            return _text_turn("Ran pytest and ruff (fake LLM).")
+        if agent == "review":
+            return _tool_turn(
+                "fake-verdict",
+                "submit_verdict",
+                {"decision": "approved", "summary": "Looks good (fake LLM).", "comments": []},
+            )
         raise NotImplementedError(f"FakeLLM has no script for {name!r}")

@@ -81,16 +81,24 @@ def test_docs_server_is_read_only_and_scoped(tracer, toy_repo, db_path):
                 doc = await tb.call("docs__read_doc", {"path": "docs/guide.md"})
                 escape = await tb.call("docs__read_doc", {"path": "../outside.md"})
                 code = await tb.call("docs__read_doc", {"path": "app.py"})
+                src = await tb.call("docs__read_file", {"path": "app.py"})
+                src_escape = await tb.call("docs__read_file", {"path": "../outside.py"})
+                src_git = await tb.call("docs__read_file", {"path": ".git/config"})
                 unknown = await tb.call("docs__write_doc", {})
-        return names, listing, found, doc, escape, code, unknown
+        return names, listing, found, doc, escape, code, unknown, src, src_escape, src_git
 
-    names, listing, found, doc, escape, code, unknown = asyncio.run(main())
+    names, listing, found, doc, escape, code, unknown, src, src_escape, src_git = asyncio.run(
+        main()
+    )
     assert names == {
         "docs__list_docs",
         "docs__search_docs",
         "docs__search_code",
         "docs__read_doc",
+        "docs__read_file",
     }
+    assert "print('hi')" in src.text and not src.is_error
+    assert src_escape.is_error and src_git.is_error
     assert "docs/guide.md" in listing.text and "README.md" in listing.text
     assert "guide.md" in found.text
     assert "Routes live in app.py" in doc.text

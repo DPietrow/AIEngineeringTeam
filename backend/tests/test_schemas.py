@@ -31,7 +31,12 @@ def test_verdict_decision_is_constrained():
 
 
 def test_test_report_and_pull_request_defaults():
-    report = TestReport(run_id="r1", passed=True, command="pytest", exit_code=0, duration_s=1.2)
-    assert report.failures == []
+    report = TestReport(
+        run_id="r1",
+        passed=True,
+        runs=[{"command": "pytest -q", "exit_code": 0, "duration_s": 1.2}],
+    )
+    assert report.failures == [] and report.missing_checks == []
+    assert report.runs[0].timed_out is False
     pr = PullRequest(run_id="r1", title="t", body="b", head_branch="feat/x")
     assert pr.base_branch == "main"

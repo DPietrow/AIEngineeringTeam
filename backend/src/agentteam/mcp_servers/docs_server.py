@@ -78,6 +78,22 @@ def build_server(root: Path) -> FastMCP:
             raise ValueError(f"no such doc: {path}")
         return target.read_text(encoding="utf-8", errors="replace")[:MAX_DOC_CHARS]
 
+    @mcp.tool(annotations=read_only)
+    def read_file(path: str) -> str:
+        """Read one source or config file by relative path (as returned by search_code)."""
+        target = (root / path).resolve()
+        parts = target.relative_to(root).parts if root in target.parents else ()
+        if (
+            not parts
+            or target.suffix.lower() not in CODE_SUFFIXES
+            or any(p.startswith(".") for p in parts)
+            or SKIP_DIRS.intersection(parts)
+        ):
+            raise ValueError(f"not a readable source file inside the repository: {path}")
+        if not target.is_file():
+            raise ValueError(f"no such file: {path}")
+        return target.read_text(encoding="utf-8", errors="replace")[:MAX_DOC_CHARS]
+
     return mcp
 
 
