@@ -1,13 +1,19 @@
 import { useEffect, useState } from 'react'
 import { createRun, fetchRuns } from './api'
 import type { RunSummary } from './types'
-import { ago, StatusBadge, usd } from './ui'
+import { ago, usd } from './format'
+import { StatusBadge } from './ui'
 
 export default function RunList() {
   const [runs, setRuns] = useState<RunSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [task, setTask] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [showEvals, setShowEvals] = useState(false)
+  // Review-eval runs are tagged "[eval-review]" in their task text by the harness.
+  const isEval = (r: RunSummary) => r.task.startsWith('[eval')
+  const visible = runs?.filter((r) => showEvals || !isEval(r))
+  const hidden = (runs?.length ?? 0) - (visible?.length ?? 0)
 
   useEffect(() => {
     let cancelled = false
@@ -61,6 +67,10 @@ export default function RunList() {
         </button>
       </form>
       {error && <p className="text-sm text-red-700">API error: {error}</p>}
+      <label className="flex items-center gap-2 text-sm text-slate-600">
+        <input type="checkbox" checked={showEvals} onChange={(e) => setShowEvals(e.target.checked)} />
+        Show eval runs{!showEvals && hidden > 0 ? ` (${hidden} hidden)` : ''}
+      </label>
       <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500">
@@ -72,7 +82,7 @@ export default function RunList() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {runs?.map((r) => (
+            {visible?.map((r) => (
               <tr key={r.id} className="hover:bg-slate-50">
                 <td className="max-w-xl truncate px-4 py-2">
                   <a href={`#/runs/${r.id}`} className="font-medium text-blue-700 hover:underline">
@@ -87,7 +97,7 @@ export default function RunList() {
                 <td className="px-4 py-2 text-right text-slate-500">{ago(r.created_at)}</td>
               </tr>
             ))}
-            {runs?.length === 0 && (
+            {visible?.length === 0 && (
               <tr>
                 <td colSpan={4} className="px-4 py-6 text-center text-slate-500">
                   No runs yet.

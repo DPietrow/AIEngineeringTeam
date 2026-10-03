@@ -16,7 +16,10 @@ function stageOf(state: string): string {
 
 export default function StateProgress({ events, status }: { events: StreamEvent[]; status: string }) {
   const transitions = events.filter((e) => e.type === 'state.transition')
-  const retries = events.filter((e) => e.type === 'loop.retry')
+  // Transitions and retries interleaved in the order they happened (event ids are monotonic).
+  const timeline = events
+    .filter((e) => e.type === 'state.transition' || e.type === 'loop.retry')
+    .sort((a, b) => a.id - b.id)
   const current = transitions.length ? stageOf(String(transitions[transitions.length - 1].data.to)) : null
   const visited = new Set(transitions.flatMap((t) => [stageOf(String(t.data.from)), stageOf(String(t.data.to))]))
   const failed = status === 'failed' || status === 'error'
@@ -45,21 +48,22 @@ export default function StateProgress({ events, status }: { events: StreamEvent[
         })}
         {failed && <li className="rounded-md border border-red-500 bg-red-50 px-3 py-1 text-sm font-medium text-red-800">{status}</li>}
       </ol>
-      {transitions.length > 0 && (
+      {timeline.length > 0 && (
         <ul className="space-y-0.5 text-xs text-slate-500">
-          {transitions.map((t) => (
-            <li key={t.id}>
-              <span className="font-mono">
-                {String(t.data.from)} &rarr; {String(t.data.to)}
-              </span>
-              {t.data.reason ? <span> &middot; {String(t.data.reason)}</span> : null}
-            </li>
-          ))}
-          {retries.map((r) => (
-            <li key={r.id} className="text-amber-700">
-              retry {String(r.data.retry)}/{String(r.data.cap)} ({String(r.data.loop)})
-            </li>
-          ))}
+          {timeline.map((e) =>
+            e.type === 'loop.retry' ? (
+              <li key={e.id} className="text-amber-700">
+                &nbsp;&nbsp;&#8635; retry {String(e.data.retry)}/{String(e.data.cap)} ({String(e.data.loop)})
+              </li>
+            ) : (
+              <li key={e.id}>
+                <span className="font-mono">
+                  {String(e.data.from)} &rarr; {String(e.data.to)}
+                </span>
+                {e.data.reason ? <span> &middot; {String(e.data.reason)}</span> : null}
+              </li>
+            ),
+          )}
         </ul>
       )}
     </div>

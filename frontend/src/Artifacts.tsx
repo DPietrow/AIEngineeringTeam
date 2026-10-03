@@ -131,28 +131,47 @@ function VerdictCard({ verdict }: { verdict: Verdict }) {
   )
 }
 
-/** Renders every artifact in emission order, so retries show as additional cards. */
+function renderOne(a: ArtifactEnvelope) {
+  switch (a.artifact) {
+    case 'design_spec':
+      return <SpecCard spec={a.data as DesignSpec} />
+    case 'patch':
+      return <PatchCard patch={a.data as Patch} />
+    case 'test_report':
+      return <TestCard report={a.data as TestReport} />
+    case 'verdict':
+      return <VerdictCard verdict={a.data as Verdict} />
+    default:
+      return (
+        <Card title={a.artifact}>
+          <pre className="overflow-auto text-xs">{JSON.stringify(a.data, null, 2)}</pre>
+        </Card>
+      )
+  }
+}
+
+/**
+ * Renders every artifact in emission order. When a retry loop produced several of the
+ * same kind (patches, test reports), only the latest is expanded; earlier ones collapse.
+ */
 export default function Artifacts({ artifacts }: { artifacts: ArtifactEnvelope[] }) {
   if (artifacts.length === 0) return null
+  const lastIndex = new Map<string, number>()
+  artifacts.forEach((a, i) => lastIndex.set(a.artifact, i))
   return (
     <div className="space-y-4">
       {artifacts.map((a, i) => {
-        switch (a.artifact) {
-          case 'design_spec':
-            return <SpecCard key={i} spec={a.data as DesignSpec} />
-          case 'patch':
-            return <PatchCard key={i} patch={a.data as Patch} />
-          case 'test_report':
-            return <TestCard key={i} report={a.data as TestReport} />
-          case 'verdict':
-            return <VerdictCard key={i} verdict={a.data as Verdict} />
-          default:
-            return (
-              <Card key={i} title={a.artifact}>
-                <pre className="overflow-auto text-xs">{JSON.stringify(a.data, null, 2)}</pre>
-              </Card>
-            )
-        }
+        if (lastIndex.get(a.artifact) === i) return <div key={i}>{renderOne(a)}</div>
+        const attempt = a.artifact === 'patch' ? ` (attempt ${(a.data as Patch).attempt})` : ''
+        return (
+          <details key={i} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm shadow-sm">
+            <summary className="cursor-pointer text-slate-600">
+              Earlier {a.artifact.replace('_', ' ')}
+              {attempt}
+            </summary>
+            <div className="mt-3">{renderOne(a)}</div>
+          </details>
+        )
       })}
     </div>
   )

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Span } from './types'
-import { duration, StatusBadge, usd } from './ui'
+import { duration, usd } from './format'
+import { StatusBadge } from './ui'
 
 interface Node {
   span: Span

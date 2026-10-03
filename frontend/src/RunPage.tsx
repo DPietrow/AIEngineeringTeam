@@ -2,7 +2,8 @@ import Artifacts from './Artifacts'
 import SpanTree from './SpanTree'
 import StateProgress from './StateProgress'
 import { useRun } from './useRun'
-import { Card, StatusBadge, usd } from './ui'
+import { usd } from './format'
+import { Card, StatusBadge } from './ui'
 
 export default function RunPage({ runId }: { runId: string }) {
   const { detail, events, live, error } = useRun(runId)
