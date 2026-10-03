@@ -7,6 +7,7 @@ than late.
 
 PRICING_USD_PER_MTOK: dict[str, tuple[float, float]] = {
     "claude-haiku-4-5-20251001": (1.00, 5.00),
+    "fake": (0.0, 0.0),  # FakeLLM must never count against the spend cap
 }
 
 FALLBACK_USD_PER_MTOK: tuple[float, float] = (15.00, 75.00)

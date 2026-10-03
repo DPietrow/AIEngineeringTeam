@@ -32,11 +32,19 @@ class PlannedChange(BaseModel):
     description: str
 
 
-class DesignSpec(Artifact):
+class DesignSpecBody(BaseModel):
+    """The part of a design spec the model writes (also its tool-call schema)."""
+
+    model_config = ConfigDict(extra="forbid")
+
     summary: str
     changes: list[PlannedChange]
     acceptance_criteria: list[str]
     risks: list[str] = Field(default_factory=list)
+
+
+class DesignSpec(Artifact, DesignSpecBody):
+    pass
 
 
 # --- Implementation -> patch --------------------------------------------------

@@ -89,13 +89,21 @@ def clean(obj: Any) -> Any:
     return _truncate(redact(to_jsonable(obj)))
 
 
-def _callsite() -> tuple[str, int]:
-    """First frame outside this module and contextlib: where the traced code was called."""
+def _callsite(stacklevel: int = 0) -> tuple[str, int]:
+    """First frame outside this module and contextlib: where the traced code was called.
+
+    stacklevel skips that many additional frames (for helpers that open spans on behalf
+    of their caller, e.g. the LLM client).
+    """
     me = os.path.normcase(__file__)
     f = sys._getframe(1)
     while f is not None:
         name = os.path.normcase(f.f_code.co_filename)
         if name != me and not name.endswith("contextlib.py"):
+            if stacklevel > 0:
+                stacklevel -= 1
+                f = f.f_back
+                continue
             try:
                 rel = os.path.relpath(f.f_code.co_filename)
             except ValueError:  # different drive on Windows
@@ -155,6 +163,21 @@ class Tracer:
             )
         return run_id
 
+    def claim_next_run(self) -> tuple[str, str] | None:
+        """Atomically move the oldest pending run to 'running'. Returns (run_id, task)."""
+        with write_tx(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT id, task FROM runs WHERE status = 'pending' ORDER BY created_at LIMIT 1"
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute(
+                "UPDATE runs SET status = 'running', updated_at = ? WHERE id = ?",
+                (_now(), row["id"]),
+            )
+            self._insert_event(conn, row["id"], None, "run.status", {"status": "running"})
+            return row["id"], row["task"]
+
     def set_run_status(self, run_id: str, status: str, **extra: Any) -> None:
         with write_tx(self.db_path) as conn:
             conn.execute(
@@ -200,7 +223,9 @@ class Tracer:
     # --- spans ----------------------------------------------------------------
 
     @contextmanager
-    def span(self, name: str, *, kind: str = "step", input: Any = None) -> Iterator[SpanHandle]:
+    def span(
+        self, name: str, *, kind: str = "step", input: Any = None, stacklevel: int = 0
+    ) -> Iterator[SpanHandle]:
         run_id = _run_id.get()
         if run_id is None:
             raise NoActiveRun(f"span {name!r} started outside a run context (use tracer.run)")
@@ -213,7 +238,7 @@ class Tracer:
                 self.emit("budget.exceeded", {"message": str(exc)}, run_id=run_id)
                 raise
 
-        callsite_file, callsite_line = _callsite()
+        callsite_file, callsite_line = _callsite(stacklevel)
         span_id = uuid.uuid4().hex
         started_at = _now()
         t0 = time.perf_counter()
