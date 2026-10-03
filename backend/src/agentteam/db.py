@@ -50,6 +50,38 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id, id);
 
+-- Eval harness: one row per eval invocation, one row per (case, trial).
+-- Each trial links to a normal run (run_id), so its full trace is inspectable.
+CREATE TABLE IF NOT EXISTS eval_runs (
+    id            TEXT PRIMARY KEY,
+    label         TEXT NOT NULL,
+    suite         TEXT NOT NULL,
+    suite_hash    TEXT,
+    config_hash   TEXT,
+    model         TEXT,
+    trials        INTEGER NOT NULL,
+    started_at    TEXT NOT NULL,
+    ended_at      TEXT,
+    total_cost_usd REAL NOT NULL DEFAULT 0,
+    truncated     INTEGER NOT NULL DEFAULT 0,
+    summary       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_eval_runs_label ON eval_runs(label);
+
+CREATE TABLE IF NOT EXISTS eval_results (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    eval_run_id TEXT NOT NULL REFERENCES eval_runs(id),
+    case_id     TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    trial       INTEGER NOT NULL,
+    run_id      TEXT,
+    passed      INTEGER NOT NULL,
+    grades      TEXT NOT NULL,
+    metrics     TEXT NOT NULL,
+    error       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_eval_results_run ON eval_results(eval_run_id);
+
 CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events
 BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events

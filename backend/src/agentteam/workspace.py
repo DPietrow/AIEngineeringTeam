@@ -75,5 +75,7 @@ def collect_patch(ws: Workspace, message: str) -> tuple[str, list[str]]:
     return _git(ws.path, "diff", ws.base_commit, "HEAD"), files
 
 
-def remove_workspace(ws: Workspace) -> None:
+def remove_workspace(ws: Workspace, delete_branch: bool = False) -> None:
     _git(ws.repo, "worktree", "remove", "--force", str(ws.path))
+    if delete_branch:
+        _git(ws.repo, "branch", "-D", ws.branch)

@@ -27,9 +27,15 @@ packages = ["src/agentteam"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = ["evals/acceptance"]  # hidden test files; they run inside the toy repo
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Long string literals (report text, case data) cannot be wrapped by the formatter.
+"src/agentteam/evals/*" = ["E501"]
+"evals/build_suite.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

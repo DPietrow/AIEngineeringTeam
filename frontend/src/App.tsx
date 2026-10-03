@@ -1,29 +1,26 @@
-import { useEffect, useState } from 'react'
-import './App.css'
+import { useSyncExternalStore } from 'react'
+import RunList from './RunList'
+import RunPage from './RunPage'
 
-type Health = { status: string; version: string }
+function subscribe(cb: () => void) {
+  window.addEventListener('hashchange', cb)
+  return () => window.removeEventListener('hashchange', cb)
+}
+const getHash = () => window.location.hash
 
-function App() {
-  const [health, setHealth] = useState<Health | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    fetch('/api/health')
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
-      .then(setHealth)
-      .catch((e: Error) => setError(e.message))
-  }, [])
+export default function App() {
+  const hash = useSyncExternalStore(subscribe, getHash)
+  const match = /^#\/runs\/([\w-]+)/.exec(hash)
 
   return (
-    <main className="app">
-      <h1>AIEngineeringTeam</h1>
-      <p>Multi-agent coding team: live trace dashboard</p>
-      <p className="status" data-state={health ? 'ok' : error ? 'error' : 'loading'}>
-        Backend:{' '}
-        {health ? `${health.status} (v${health.version})` : error ? `unreachable (${error})` : 'checking...'}
-      </p>
-    </main>
+    <div className="mx-auto max-w-5xl px-4 py-6">
+      <header className="mb-6 flex items-baseline justify-between">
+        <a href="#/" className="text-xl font-bold">
+          AIEngineeringTeam
+        </a>
+        <span className="text-xs text-slate-500">run observability</span>
+      </header>
+      {match ? <RunPage key={match[1]} runId={match[1]} /> : <RunList />}
+    </div>
   )
 }
-
-export default App
