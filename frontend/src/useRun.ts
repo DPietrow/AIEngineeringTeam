@@ -19,6 +19,8 @@ const EVENT_TYPES = [
   'state.transition',
   'loop.retry',
   'gate.decision',
+  'llm.retry',
+  'run.recovered',
 ]
 
 /**

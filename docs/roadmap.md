@@ -12,8 +12,9 @@ Last updated: 2026-10-03 (dashboard and Delivery built).
    do: retry for a delivery that errors after the push (today the run ends `error` and the
    branch stays pushed). Done: worktree/branch cleanup (automatic + `agentteam.cleanup`), and an
    honest `no_changes` status.
-4. Resilience: API retries with backoff, run recovery after worker crash, per-run wall-clock
-   timeout, worktree cleanup, prompt caching, per-agent models, trace payload trimming.
+4. Resilience: **built**: API retries with backoff, run recovery after worker crash (leases),
+   per-run wall-clock timeout, worktree cleanup. Still open: prompt caching, per-agent models,
+   trace payload trimming, delivery retry after a post-push error, a "retry run" button.
 5. Production readiness: API authentication, hardened redaction, runbook.
 6. Hosted deployment, including the Postgres cutover below.
 

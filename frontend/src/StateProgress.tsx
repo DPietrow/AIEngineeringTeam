@@ -21,11 +21,13 @@ export default function StateProgress({ events, status }: { events: StreamEvent[
   const transitions = events.filter((e) => e.type === 'state.transition')
   // Transitions and retries interleaved in the order they happened (event ids are monotonic).
   const timeline = events
-    .filter((e) => ['state.transition', 'loop.retry', 'gate.decision'].includes(e.type))
+    .filter((e) =>
+      ['state.transition', 'loop.retry', 'gate.decision', 'llm.retry', 'run.recovered'].includes(e.type),
+    )
     .sort((a, b) => a.id - b.id)
   const current = transitions.length ? stageOf(String(transitions[transitions.length - 1].data.to)) : null
   const visited = new Set(transitions.flatMap((t) => [stageOf(String(t.data.from)), stageOf(String(t.data.to))]))
-  const failed = status === 'failed' || status === 'error' || status === 'rejected'
+  const failed = ['failed', 'error', 'rejected', 'timed_out'].includes(status)
   // The human-approval stage only appears for runs that went through the gate.
   const stages = visited.has('approval') || GATE_STATUSES.has(status)
     ? ['design', 'implement', 'test', 'review', 'approval', 'done']
@@ -66,6 +68,16 @@ export default function StateProgress({ events, status }: { events: StreamEvent[
             e.type === 'loop.retry' ? (
               <li key={e.id} className="text-amber-700">
                 &nbsp;&nbsp;&#8635; retry {String(e.data.retry)}/{String(e.data.cap)} ({String(e.data.loop)})
+              </li>
+            ) : e.type === 'llm.retry' ? (
+              <li key={e.id} className="text-amber-700">
+                &nbsp;&nbsp;&#8635; API retry {String(e.data.attempt)}/{String(e.data.max_retries)} in{' '}
+                {String(e.data.delay_s)}s ({String(e.data.error)}
+                {e.data.status_code ? ` ${String(e.data.status_code)}` : ''})
+              </li>
+            ) : e.type === 'run.recovered' ? (
+              <li key={e.id} className="font-medium text-orange-700">
+                recovered after worker loss: {String(e.data.was)} &rarr; {String(e.data.now)}
               </li>
             ) : e.type === 'gate.decision' ? (
               <li key={e.id} className="font-medium text-slate-700">

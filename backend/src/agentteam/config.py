@@ -35,6 +35,16 @@ class Settings:
     sandbox_pids_limit: int = 128
     sandbox_timeout_s: int = 120
 
+    # Resilience. A run that exceeds run_timeout_s ends "timed_out". Transient API failures
+    # (429, 5xx, 529, dropped connections) are retried with backoff before a run is failed.
+    run_timeout_s: float = 900.0
+    llm_max_retries: int = 4
+    llm_retry_base_delay_s: float = 1.0
+    llm_timeout_s: float = 120.0
+    # A worker holds a lease on the run it is executing and renews it every lease_s / 3. If the
+    # worker dies, the lease expires and the run is recovered (see Tracer.recover_orphans).
+    worker_lease_s: float = 60.0
+
     # Delivery (GitHub PR behind a human gate). Disabled unless BOTH token and repo are set;
     # when disabled, an approved review ends the run as 'done' exactly as before.
     github_token: str | None = None
@@ -89,6 +99,11 @@ class Settings:
             max_review_steps=int(env("MAX_REVIEW_STEPS", cls.max_review_steps)),
             max_test_retries=int(env("MAX_TEST_RETRIES", cls.max_test_retries)),
             max_review_rounds=int(env("MAX_REVIEW_ROUNDS", cls.max_review_rounds)),
+            run_timeout_s=float(env("RUN_TIMEOUT_S", cls.run_timeout_s)),
+            llm_max_retries=int(env("LLM_MAX_RETRIES", cls.llm_max_retries)),
+            llm_retry_base_delay_s=float(env("LLM_RETRY_BASE_DELAY_S", cls.llm_retry_base_delay_s)),
+            llm_timeout_s=float(env("LLM_TIMEOUT_S", cls.llm_timeout_s)),
+            worker_lease_s=float(env("WORKER_LEASE_S", cls.worker_lease_s)),
             github_token=env("GITHUB_TOKEN") or None,
             github_repo=env("GITHUB_REPO") or None,
             github_base_branch=env("GITHUB_BASE_BRANCH", cls.github_base_branch),

@@ -17,7 +17,8 @@ bp = Blueprint("api", __name__, url_prefix="/api")
 # stopped: spend cap. rejected: a human declined at the approval gate. no_changes: the agents
 # found nothing to change (request already satisfied). Non-terminal gate statuses:
 # awaiting_approval -> approved -> delivering.
-TERMINAL_STATUSES = {"done", "failed", "error", "stopped", "rejected", "no_changes"}
+# timed_out: exceeded the run's wall-clock limit.
+TERMINAL_STATUSES = {"done", "failed", "error", "stopped", "rejected", "no_changes", "timed_out"}
 MAX_TASK_CHARS = 5000
 
 

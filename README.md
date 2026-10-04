@@ -45,6 +45,15 @@ uv run python -m agentteam.worker                   # terminal 2: worker
 # terminal 3: submit a task, then stream http://127.0.0.1:5000/api/runs/<id>/events
 ```
 
+### Resilience
+
+- **API retries:** 429, 5xx (incl. 529 overloaded), timeouts and dropped connections are retried
+  with exponential backoff and jitter (`LLM_MAX_RETRIES`); each retry shows in the run timeline.
+- **Time limit:** a run longer than `RUN_TIMEOUT_S` ends `timed_out`.
+- **Crash recovery:** if the worker is killed mid-run, its lease expires and a worker (on startup
+  and every 30 s) recovers the run: `running` becomes `error` (resubmit it), `delivering` goes
+  back to `approved` and is retried. Run only one worker unless you know why you want more.
+
 ### Cleanup
 
 Worktrees and local `agent/*` branches are removed automatically once a PR is opened and when a

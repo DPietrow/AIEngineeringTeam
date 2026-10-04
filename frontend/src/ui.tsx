@@ -13,6 +13,7 @@ const STATUS_STYLES: Record<string, string> = {
   delivering: 'bg-blue-100 text-blue-800',
   rejected: 'bg-slate-200 text-slate-700',
   no_changes: 'bg-slate-200 text-slate-700',
+  timed_out: 'bg-orange-100 text-orange-800',
 }
 
 export function StatusBadge({ status }: { status: string }) {

@@ -24,6 +24,7 @@ from .agents.review import Review
 from .agents.testing import Testing
 from .budget import SpendCapExceeded
 from .config import Settings
+from .deadline import RunTimeout, check_deadline, run_deadline
 from .llm import LLM
 from .schemas import DesignSpec, Patch, TestReport, Verdict
 from .tracing import Tracer, set_tracer
@@ -73,6 +74,7 @@ class Orchestrator:
         """Run a claimed run to completion. Never raises; failures become run status."""
         try:
             with (
+                run_deadline(self.settings.run_timeout_s),
                 self.tracer.run(run_id),
                 self.tracer.span("run", kind="orchestrator", input={"task": task}) as root,
             ):
@@ -88,6 +90,9 @@ class Orchestrator:
                 self.tracer.set_run_status(run_id, "failed", reason=outcome["reason"])
         except SpendCapExceeded as exc:
             self.tracer.set_run_status(run_id, "stopped", reason=str(exc))
+        except RunTimeout as exc:
+            limit = f"{self.settings.run_timeout_s:g}s"
+            self.tracer.set_run_status(run_id, "timed_out", reason=f"{exc} (limit {limit})")
         except Exception as exc:
             self.tracer.set_run_status(run_id, "error", error=f"{type(exc).__name__}: {exc}")
 
@@ -98,6 +103,7 @@ class Orchestrator:
         s = self.settings
         try:
             with (
+                run_deadline(s.run_timeout_s),
                 self.tracer.run(run_id),
                 self.tracer.span("deliver", kind="orchestrator", input={"run_id": run_id}) as root,
             ):
@@ -133,6 +139,9 @@ class Orchestrator:
             self.tracer.set_run_status(run_id, "done")
         except SpendCapExceeded as exc:
             self.tracer.set_run_status(run_id, "stopped", reason=str(exc))
+        except RunTimeout as exc:
+            limit = f"{s.run_timeout_s:g}s"
+            self.tracer.set_run_status(run_id, "timed_out", reason=f"{exc} (limit {limit})")
         except Exception as exc:
             self.tracer.set_run_status(run_id, "error", error=f"{type(exc).__name__}: {exc}")
 
@@ -177,6 +186,7 @@ class Orchestrator:
         reason = ""
 
         while state not in (State.DONE, State.FAILED, State.AWAITING_APPROVAL, State.NO_CHANGES):
+            check_deadline()
             if state is State.DESIGN:
                 spec = architect.design(run_id, task)
                 self._artifact("design_spec", spec)

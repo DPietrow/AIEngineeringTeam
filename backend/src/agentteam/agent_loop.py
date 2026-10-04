@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from .deadline import check_deadline
 from .llm import LLM
 from .mcp_toolbox import MAX_RESULT_CHARS_FOR_LLM, Toolbox, ToolResult
 from .tracing import Tracer
@@ -58,6 +59,7 @@ async def run_agent_loop(
     nudged = False
 
     for step in range(1, max_steps + 1):
+        check_deadline()  # stop between steps, never in the middle of a call
         turn = llm.converse(
             name=f"{name}.step{step}", system=system, messages=messages, tools=tools
         )

@@ -100,4 +100,12 @@ export interface PullRequest {
   number: number | null
 }
 
-export const TERMINAL = new Set(['done', 'failed', 'error', 'stopped', 'rejected', 'no_changes'])
+export const TERMINAL = new Set([
+  'done',
+  'failed',
+  'error',
+  'stopped',
+  'rejected',
+  'no_changes',
+  'timed_out',
+])

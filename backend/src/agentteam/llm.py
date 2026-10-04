@@ -6,6 +6,7 @@ Two call styles:
 """
 
 import re
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -14,6 +15,7 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
+from .retry import call_with_retries
 from .schemas import DesignSpecBody, PlannedChange
 from .tracing import Tracer
 
@@ -105,13 +107,34 @@ class AnthropicLLM(LLM):
         api_key: str | None = None,
         model: str = DEFAULT_MODEL,
         max_tokens: int = 4096,
+        max_retries: int = 4,
+        retry_base_delay_s: float = 1.0,
+        timeout_s: float = 120.0,
+        client: Any = None,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         super().__init__(tracer)
-        import anthropic  # imported lazily so tests and fake mode need no SDK/key
+        if client is None:
+            import anthropic  # imported lazily so tests and fake mode need no SDK/key
 
-        self.client = anthropic.Anthropic(api_key=api_key)
+            # SDK-level retries are OFF: we retry ourselves (retry.py) so every retry is
+            # traced and bounded by the run's deadline, and so retries are not multiplied.
+            client = anthropic.Anthropic(api_key=api_key, max_retries=0, timeout=timeout_s)
+        self.client = client
         self.model = model
         self.max_tokens = max_tokens
+        self.max_retries = max_retries
+        self.retry_base_delay_s = retry_base_delay_s
+        self._sleep = sleep
+
+    def _create(self, **kwargs: Any) -> Any:
+        return call_with_retries(
+            lambda: self.client.messages.create(**kwargs),
+            tracer=self.tracer,
+            max_retries=self.max_retries,
+            base_delay_s=self.retry_base_delay_s,
+            sleep=self._sleep,
+        )
 
     def _call(self, name, system, user, schema):
         tool = {
@@ -119,7 +142,7 @@ class AnthropicLLM(LLM):
             "description": f"Return the {name} as structured data.",
             "input_schema": schema.model_json_schema(),
         }
-        resp = self.client.messages.create(
+        resp = self._create(
             model=self.model,
             max_tokens=self.max_tokens,
             system=system,
@@ -136,7 +159,7 @@ class AnthropicLLM(LLM):
         kwargs: dict[str, Any] = {}
         if tools:
             kwargs["tools"] = tools
-        resp = self.client.messages.create(
+        resp = self._create(
             model=self.model,
             max_tokens=self.max_tokens,
             system=system,

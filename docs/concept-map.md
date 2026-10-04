@@ -48,6 +48,24 @@ Last updated: 2026-10-03 (after the eval harness).
 | Least-privilege credential | Fine-grained PAT limited to one repo (Contents + Pull requests); passed by env var, never argv; scrubbed by `register_secret` and redaction | `.env.example`, `workspace.py`, `worker.py` | Done |
 | Offline testing of external integrations | Fake MCP server stands in for GitHub; a local bare repo stands in for the remote | `tests/fake_github_server.py`, `tests/test_delivery.py` | Done |
 
+### Reliability and failure handling
+
+| Concept | What it means | Component | Status |
+|---|---|---|---|
+| Retry only what can succeed | Transient errors (429, 5xx/529, timeouts, connection drops) are retried; 4xx client errors fail at once | `retry.py` `is_retryable` | Done |
+| Exponential backoff with full jitter | Window doubles per attempt, capped; random within the window so many clients do not retry in lockstep; server `retry-after` wins (bounded) | `retry.py` `backoff_delay` | Done |
+| One retry layer, not two | SDK retries disabled so retries are not multiplied and every one is observable | `llm.py` `AnthropicLLM` | Done |
+| Retries are observable | Each retry is an `llm.retry` event shown in the timeline, so a slow run is explainable | `retry.py`, `StateProgress.tsx` | Done |
+| Request timeout | A hung API call cannot stall a run indefinitely | `llm.py` (`LLM_TIMEOUT_S`) | Done |
+| Wall-clock budget per run | Cooperative deadline in a contextvar, checked between agent steps, loop iterations and before retry sleeps; ends `timed_out`. Worst overshoot is one step, bounded by the API, MCP and sandbox timeouts | `deadline.py`, `agent_loop.py`, `orchestrator.py` | Done |
+| Timeouts nest | Retry sleeps respect the run deadline; run deadline sits above per-call timeouts | `retry.py`, `deadline.py` | Done |
+| Leases and heartbeats | A worker holds a lease on its run and renews it from a background thread; no heartbeat means the worker is presumed dead | `tracing.py` `claim_next_run` / `renew_lease`, `worker.py` `Heartbeat` | Done |
+| Crash recovery | Expired leases are swept: `running` becomes `error` (re-running would repeat spend on a half-built workspace); `delivering` returns to `approved` (the human already decided; push is idempotent) | `tracing.py` `recover_orphans` | Done |
+| Don't leave the trace lying | Spans a dead worker left "running" are closed as errors | `tracing.py` `recover_orphans` | Done |
+| Recovery is idempotent and conservative | Runs without a lease (eval harness, tests) are never touched; recovering twice is a no-op | `tracing.py` | Done |
+| Schema evolution | Columns added to existing databases by an idempotent migration; becomes real migrations at the Postgres cutover | `db.py` `_migrate` | Done |
+| Known gap: no multi-worker fairness testing | Leases make several workers safe in principle; only single-worker behaviour is tested | n/a | Open |
+
 ### Resource hygiene
 
 | Concept | What it means | Component | Status |

@@ -44,6 +44,13 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _lease(worker_id: str | None, lease_s: float) -> str | None:
+    """Lease expiry timestamp, or None when there is no worker (no lease, never recovered)."""
+    if worker_id is None:
+        return None
+    return (datetime.now(UTC) + timedelta(seconds=lease_s)).isoformat()
+
+
 def _dumps(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, default=repr)
 
@@ -163,8 +170,14 @@ class Tracer:
             )
         return run_id
 
-    def claim_next_run(self) -> tuple[str, str] | None:
-        """Atomically move the oldest pending run to 'running'. Returns (run_id, task)."""
+    def claim_next_run(
+        self, worker_id: str | None = None, lease_s: float = 60.0
+    ) -> tuple[str, str] | None:
+        """Atomically move the oldest pending run to 'running'. Returns (run_id, task).
+
+        With a worker_id the claim also takes a lease (see renew_lease / recover_orphans).
+        Without one (tests, the eval harness) the run has no lease and is never recovered.
+        """
         with write_tx(self.db_path) as conn:
             row = conn.execute(
                 "SELECT id, task FROM runs WHERE status = 'pending' ORDER BY created_at LIMIT 1"
@@ -172,11 +185,71 @@ class Tracer:
             if row is None:
                 return None
             conn.execute(
-                "UPDATE runs SET status = 'running', updated_at = ? WHERE id = ?",
-                (_now(), row["id"]),
+                "UPDATE runs SET status = 'running', updated_at = ?, claimed_by = ?, "
+                "lease_expires_at = ? WHERE id = ?",
+                (_now(), worker_id, _lease(worker_id, lease_s), row["id"]),
             )
             self._insert_event(conn, row["id"], None, "run.status", {"status": "running"})
             return row["id"], row["task"]
+
+    def renew_lease(self, run_id: str, worker_id: str, lease_s: float) -> bool:
+        """Heartbeat: extend this worker's lease. False if the run is no longer ours (it was
+        recovered after a long stall), so the caller knows it lost the run."""
+        with write_tx(self.db_path) as conn:
+            cur = conn.execute(
+                "UPDATE runs SET lease_expires_at = ? "
+                "WHERE id = ? AND claimed_by = ? AND status IN ('running', 'delivering')",
+                (_lease(worker_id, lease_s), run_id, worker_id),
+            )
+            return cur.rowcount == 1
+
+    def recover_orphans(self) -> list[dict[str, str]]:
+        """Find runs whose worker died (lease expired) and put them in a sane state.
+
+        - 'running'    -> 'error'. Re-running would repeat the spend on a half-built workspace,
+                          so a human resubmits instead.
+        - 'delivering' -> 'approved'. The human already approved; pushing is idempotent, so the
+                          worker simply tries delivery again (a duplicate-PR rejection from
+                          GitHub would surface as a clear error).
+        Spans left 'running' by the dead worker are closed as errors, so the trace does not show
+        work that is still in progress when nothing is. Runs without a lease are never touched.
+        """
+        recovered: list[dict[str, str]] = []
+        now = _now()
+        with write_tx(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT id, status, claimed_by FROM runs "
+                "WHERE status IN ('running', 'delivering') "
+                "AND lease_expires_at IS NOT NULL AND lease_expires_at < ?",
+                (now,),
+            ).fetchall()
+            for row in rows:
+                run_id, was = row["id"], row["status"]
+                new_status = "error" if was == "running" else "approved"
+                reason = f"worker {row['claimed_by']} stopped responding while the run was {was}"
+                conn.execute(
+                    "UPDATE spans SET status = 'error', ended_at = ?, error = ? "
+                    "WHERE run_id = ? AND status = 'running'",
+                    (now, "worker lost: " + reason, run_id),
+                )
+                conn.execute(
+                    "UPDATE runs SET status = ?, updated_at = ?, claimed_by = NULL, "
+                    "lease_expires_at = NULL WHERE id = ?",
+                    (new_status, now, run_id),
+                )
+                action = "marked_error" if was == "running" else "requeued_delivery"
+                self._insert_event(
+                    conn,
+                    run_id,
+                    None,
+                    "run.recovered",
+                    {"was": was, "now": new_status, "action": action, "reason": reason},
+                )
+                status_data: dict[str, Any] = {"status": new_status}
+                status_data["error" if new_status == "error" else "reason"] = reason
+                self._insert_event(conn, run_id, None, "run.status", status_data)
+                recovered.append({"run_id": run_id, "was": was, "now": new_status})
+        return recovered
 
     def decide_gate(self, run_id: str, decision: str, reason: str = "") -> bool:
         """Record the human decision on a run waiting at the approval gate.
@@ -202,7 +275,9 @@ class Tracer:
             self._insert_event(conn, run_id, None, "run.status", {"status": new_status})
             return True
 
-    def claim_next_delivery(self) -> str | None:
+    def claim_next_delivery(
+        self, worker_id: str | None = None, lease_s: float = 60.0
+    ) -> str | None:
         """Atomically move the oldest human-approved run to 'delivering'. Returns its id."""
         with write_tx(self.db_path) as conn:
             row = conn.execute(
@@ -211,8 +286,9 @@ class Tracer:
             if row is None:
                 return None
             conn.execute(
-                "UPDATE runs SET status = 'delivering', updated_at = ? WHERE id = ?",
-                (_now(), row["id"]),
+                "UPDATE runs SET status = 'delivering', updated_at = ?, claimed_by = ?, "
+                "lease_expires_at = ? WHERE id = ?",
+                (_now(), worker_id, _lease(worker_id, lease_s), row["id"]),
             )
             self._insert_event(conn, row["id"], None, "run.status", {"status": "delivering"})
             return str(row["id"])

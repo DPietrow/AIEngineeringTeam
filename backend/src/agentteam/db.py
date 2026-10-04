@@ -13,7 +13,11 @@ CREATE TABLE IF NOT EXISTS runs (
     config_hash    TEXT,
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL,
-    total_cost_usd REAL NOT NULL DEFAULT 0
+    total_cost_usd REAL NOT NULL DEFAULT 0,
+    -- Lease: set when a worker claims the run, renewed while it works. An expired lease on a
+    -- running/delivering run means the worker died (see Tracer.recover_orphans).
+    claimed_by       TEXT,
+    lease_expires_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS spans (
@@ -103,10 +107,27 @@ def connect(path: str | Path) -> sqlite3.Connection:
     return conn
 
 
+# Columns added after the first release: (table, column, definition). CREATE TABLE IF NOT EXISTS
+# does not alter an existing table, so databases created earlier get them via ALTER TABLE.
+# (At the Postgres cutover this list becomes real numbered migrations.)
+_ADDED_COLUMNS = [
+    ("runs", "claimed_by", "TEXT"),
+    ("runs", "lease_expires_at", "TEXT"),
+]
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    for table, column, definition in _ADDED_COLUMNS:
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
 def init_db(path: str | Path) -> None:
     conn = connect(path)
     try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
     finally:
         conn.close()
 

@@ -17,9 +17,12 @@ export default function RunPage({ runId }: { runId: string }) {
   // Why the run ended: a crash message on a root span (run / deliver), or the reason carried
   // by the final run.status event (failed, stopped, no_changes).
   const lastStatus = [...events].reverse().find((e) => e.type === 'run.status')
-  const runError =
-    spans.find((s) => s.parent_id === null && s.error)?.error ??
-    (typeof lastStatus?.data.reason === 'string' ? lastStatus.data.reason : null)
+  const statusText = [lastStatus?.data.error, lastStatus?.data.reason].find(
+    (v): v is string => typeof v === 'string' && v.length > 0,
+  )
+  // Prefer the status event's message (it also carries recovery reasons); a root span's error
+  // text is the fallback, e.g. when the page loaded without the event stream's history.
+  const runError = statusText ?? spans.find((s) => s.parent_id === null && s.error)?.error ?? null
   const neutral = run.status === 'no_changes'
   return (
     <div className="space-y-4">
