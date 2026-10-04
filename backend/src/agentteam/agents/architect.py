@@ -46,6 +46,7 @@ class Architect:
                 toolbox=toolbox,
                 max_steps=self.max_steps,
                 submit_tool=SUBMIT_DESIGN_SPEC,
+                validate_submit=DesignSpecBody.model_validate,
             )
         if result.submitted is None:
             raise AgentError("architect finished without submitting a design spec")

@@ -202,7 +202,10 @@ Last updated: 2026-10-03 (after the eval harness).
 |---|---|---|---|
 | 2026-10-03 | Architect hit its 8-step cap: the docs tool refused source files, so it kept searching | Tool design and step caps as a safety net | Added `read_file`, budgeted the prompt, cap 10 |
 | 2026-10-03 | Testing tests failed only on Windows with `BrokenResourceError` | Subprocess stdin inheritance corrupted the MCP stdio protocol | `stdin=DEVNULL` in the sandbox |
-| 2026-10-03 | Haiku sent `edits` as a JSON string; the tool rejected it, the model retried | Models violate schemas; recovery loop worked but cost a call | `coerce_args` (does not yet catch this case) |
+| 2026-10-03 | Haiku sent `edits` as a JSON string; the tool rejected it, the model retried | Models violate schemas; recovery loop worked but cost a call | `coerce_args`, now recursive: also decodes Python-style single-quoted literals, stringified items inside a real array, and `anyOf` types; never touches string-typed fields |
+| 2026-10-03 | Eval scorecards run on the live toy repo: `count-notes` ended `no_changes`, reviewers flagged a duplicate `/notes/count` route, so 3 cases and the headline cost numbers were invalid | An eval environment must be frozen; the live repo accumulates merged PRs. The wrong repo was easy to use because it is the default `TOY_REPO_PATH` | `EVAL_TOY_REPO_PATH`; `evals run` prints the repo and refuses one with a git remote unless `--allow-live-repo` |
+| 2026-10-03 | Architect and Reviewer sent `changes` / `comments` as JSON strings in their *submit* tool; `VerdictBody` validation failed and the trial scored as no decision | Schema repair existed only for MCP tools, not for the built-in structured-output tool | The agent loop repairs the submission against its schema, and on a validation error returns it to the model as a failed tool result so it can fix it (bounded by the step cap); `agent.submit_rejected` event |
+| 2026-10-03 | "reviewer finished without submitting a verdict" in a `search-notes` trial | The model ended a turn with prose; one nudge was not always enough | Up to two nudges before giving up |
 | 2026-10-03 | Real run: spec, patch, 11 tests in Docker, approved, 57 s, about $0.10 | Baseline for cost and latency | Evals now track this |
 | earlier | Fake-LLM cost counted against spend caps | Cost accounting must distinguish fake from real | `pricing.py` fake model at $0 |
 | earlier | Filesystem MCP hung when proxy env vars were stripped | Subprocess environment is part of the harness | `_server_env` pass-through (secrets excluded) |
@@ -220,9 +223,41 @@ Last updated: 2026-10-03 (after the eval harness).
 
 Reading the result: the holdout gain is 7/12 -> 12/12 bad-patch trials (roughly p = 0.02 by
 Fisher's exact test), but the 12 trials are 4 cases x 3 repeats, so the real evidence is about
-4 independent cases. The review suite is now saturated (100%), so it can no longer separate
-better prompts from good ones; it needs harder cases. Still unmeasured: whether the stricter
-reviewer raises retry rate and cost on the real coding suite (controls are only 4 patches).
+4 independent cases. The original review suite saturated at 100%, so ten harder cases were
+added (above); on those, Haiku with prompt v2 is at 95% catch and 0% false blocks, with one
+subtle case it still misses sometimes. Still unmeasured: whether the stricter reviewer raises
+retry rate and cost on the real coding suite (controls are only 4 patches).
+
+### Hard review cases (added 2026-10-03)
+
+Ten cases tagged `hard` (7 bad, 3 good controls), written after the original review suite
+saturated. The bugs are subtler: the tests pass, the diff looks tidy, and the defect needs
+reasoning to find. Examples: ids computed as `len(notes)+1` so a note added after a delete
+overwrites another; PUT that drops the note's `id`; search that is `startswith` rather than
+substring; text not stripped when the spec says stripped; an empty store reporting `count=1`;
+an unrequested `search.log` side effect; two bad-input cases quietly removed from an existing
+parametrized test. The controls include unusual-but-correct patches (extra store-level tests, an
+extra edge test) to check for false blocks. They were written against review prompt v2 but never
+used to tune it, so they behave as held-out cases. Run: `--tag hard`.
+
+| Date | Label | Config | Review accuracy / catch / false-block | Cost | Notes |
+|---|---|---|---|---|---|
+| 2026-10-03 | `hard-haiku-clean` | Haiku 4.5 reviewer, prompt v2, frozen repo | 97% / 95% / 0% | $0.73 | One miss: `hard-bad-update-not-stripped` approved 1 of 3 trials (spec says text is stripped; the patch stores it raw and the test uses clean text) |
+| 2026-10-03 | `hard-sonnet-clean` | Sonnet 5.5 reviewer, prompt v2, frozen repo | 97% / 95% / 0% | $0.57 | Caught `not-stripped` 3/3. Its one "miss" was not a judgement error: the model sent `comments` as a JSON string, the verdict failed validation and the trial scored as no decision (fixed, see section 3) |
+| 2026-10-03 | `hard-haiku`, `hard-sonnet-review` (invalid) | same, but on the LIVE toy repo | 83% / 90% / 33% and 90% / 100% / 33% | $1.39 | Discarded for the count cases: the live repo already had `/notes/count`, so the reviewer correctly flagged a duplicate route. The other seven cases agree with the clean runs, and `not-stripped` was Haiku 1/3 and 2/3 across the two Haiku runs vs Sonnet 6/6 |
+
+| Date | Label | Config | Coding | Cost | Notes |
+|---|---|---|---|---|---|
+| 2026-10-03 | `count-cache-off` vs `count-cache-on` | Haiku 4.5, Sonnet architect, frozen repo, `PROMPT_CACHING=0` vs 1 | `count-notes` 100% vs 100% | $0.119 -> $0.066 per pass (-45%) | 64% of input tokens were cache reads; time and retry rate unchanged |
+| 2026-10-03 | `cache-off` vs `cache-on` (live repo) | same | headline numbers invalid (`count-notes` was a no-op) | | The four unaffected cases: `delete-note` $0.205 -> $0.114, `get-note` $0.152 -> $0.097, `update-note` $0.259 -> $0.128, `search-notes` $0.136 -> $0.087. 73% of input tokens were reads |
+
+Reading it: prompt caching cut cost per case by roughly 35-50% on every case, with no change in
+outcomes (pass rates moved only through unrelated flakiness: one step-limit run, one reviewer
+that did not submit). That is consistent: five cases, same direction, a mechanism that
+explains it (long loops re-send the same prefix every turn). The exact percentage is not
+trustworthy at 3 trials per case. For the reviewer, Sonnet matched Haiku overall and was better on
+the one subtle case (not-stripped), but one case at 3 trials per run is weak evidence; the next
+step would be more cases of that kind (spec details the test does not exercise).
 
 ## 4. How to keep this file current
 

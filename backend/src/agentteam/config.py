@@ -17,6 +17,9 @@ class Settings:
     llm_model: str = DEFAULT_MODEL
     anthropic_api_key: str | None = None
     toy_repo_path: str | None = None
+    # Evals need a pristine, frozen copy of the toy repo (no remote), because the live repo
+    # accumulates merged agent PRs that turn eval cases into no-ops. Falls back to toy_repo_path.
+    eval_toy_repo_path: str | None = None
     workspaces_dir: str = "data/workspaces"
 
     # Per-agent model overrides, e.g. (("review", "claude-sonnet-5-5"),). An agent with no entry
@@ -117,6 +120,7 @@ class Settings:
             prompt_caching=env("PROMPT_CACHING", "1").lower() not in ("0", "false", "no", "off"),
             anthropic_api_key=env("ANTHROPIC_API_KEY") or None,
             toy_repo_path=env("TOY_REPO_PATH") or None,
+            eval_toy_repo_path=env("EVAL_TOY_REPO_PATH") or None,
             workspaces_dir=env("WORKSPACES_DIR", cls.workspaces_dir),
             max_architect_steps=int(env("MAX_ARCHITECT_STEPS", cls.max_architect_steps)),
             max_implementation_steps=int(

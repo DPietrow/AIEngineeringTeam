@@ -49,6 +49,34 @@ def test_coerce_args_decodes_stringified_arrays_and_objects():
     assert coerce_args(schema, {"edits": '{"a": 1}'}) == {"edits": '{"a": 1}'}
 
 
+def test_coerce_args_handles_python_literals_nested_items_and_anyof():
+    # Shape of the filesystem server's edit_file schema.
+    schema = {
+        "properties": {
+            "edits": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"oldText": {"type": "string"}, "newText": {"type": "string"}},
+                },
+            },
+            "maybe": {"anyOf": [{"type": "array"}, {"type": "null"}]},
+        }
+    }
+    # Single-quoted (Python-style) list of dicts: not valid JSON.
+    out = coerce_args(schema, {"edits": "[{'oldText': 'a', 'newText': 'b'}]"})
+    assert out["edits"] == [{"oldText": "a", "newText": "b"}]
+    # Real list whose items are themselves stringified.
+    out = coerce_args(schema, {"edits": ['{"oldText": "a", "newText": "b"}']})
+    assert out["edits"] == [{"oldText": "a", "newText": "b"}]
+    # Type given via anyOf.
+    assert coerce_args(schema, {"maybe": "[1, 2]"})["maybe"] == [1, 2]
+    # A string-typed field is never decoded, even if it looks like JSON.
+    assert coerce_args(schema, {"edits": [{"oldText": "[1]", "newText": "{}"}]})["edits"] == [
+        {"oldText": "[1]", "newText": "{}"}
+    ]
+
+
 def test_docs_server_skips_hidden_dirs_and_searches_code(tracer, toy_repo):
     (toy_repo / ".pytest_cache").mkdir()
     (toy_repo / ".pytest_cache" / "README.md").write_text("cache readme")

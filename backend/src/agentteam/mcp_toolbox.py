@@ -6,6 +6,7 @@ Least privilege is enforced twice: tools an agent may not use are never shown to
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import shutil
@@ -85,17 +86,54 @@ def coerce_args(schema: dict[str, Any] | None, args: dict[str, Any]) -> dict[str
     """Small models sometimes send arrays/objects as JSON-encoded strings. Decode those
     when the tool's schema says the argument should be an array or object."""
     properties = (schema or {}).get("properties", {})
-    fixed = dict(args)
-    for key, value in args.items():
-        expected = properties.get(key, {}).get("type")
-        if isinstance(value, str) and expected in ("array", "object"):
-            try:
-                parsed = json.loads(value)
-            except ValueError:
-                continue
-            if isinstance(parsed, list if expected == "array" else dict):
-                fixed[key] = parsed
-    return fixed
+    return {key: _coerce_value(properties.get(key, {}), value) for key, value in args.items()}
+
+
+def _schema_types(schema: dict[str, Any]) -> set[str]:
+    """Types a schema accepts, looking through anyOf/oneOf and `type: [..]` forms."""
+    types: set[str] = set()
+    t = schema.get("type")
+    if isinstance(t, str):
+        types.add(t)
+    elif isinstance(t, list):
+        types.update(x for x in t if isinstance(x, str))
+    for key in ("anyOf", "oneOf"):
+        for sub in schema.get(key, []) or []:
+            if isinstance(sub, dict):
+                types |= _schema_types(sub)
+    return types
+
+
+def _decode_container(text: str, want: type) -> Any:
+    """Parse a string as JSON, then as a Python literal (models often send single quotes).
+    Returns None if it is not a container of the wanted kind."""
+    for parse in (json.loads, ast.literal_eval):
+        try:
+            parsed = parse(text.strip())
+        except (ValueError, SyntaxError, MemoryError, RecursionError):
+            continue
+        if isinstance(parsed, want):
+            return parsed
+    return None
+
+
+def _coerce_value(schema: dict[str, Any], value: Any) -> Any:
+    types = _schema_types(schema)
+    if isinstance(value, str):
+        if "string" in types:
+            return value  # a string is acceptable as-is; never second-guess it
+        for name, want in (("array", list), ("object", dict)):
+            if name in types:
+                parsed = _decode_container(value, want)
+                if parsed is not None:
+                    return _coerce_value(schema, parsed)
+        return value
+    if isinstance(value, list) and isinstance(schema.get("items"), dict):
+        return [_coerce_value(schema["items"], v) for v in value]
+    if isinstance(value, dict) and isinstance(schema.get("properties"), dict):
+        props = schema["properties"]
+        return {k: _coerce_value(props.get(k, {}), v) for k, v in value.items()}
+    return value
 
 
 _PASSTHROUGH_EXACT = {"PYTHONPATH", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"}

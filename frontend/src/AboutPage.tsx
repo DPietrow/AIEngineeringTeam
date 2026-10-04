@@ -289,12 +289,24 @@ const EVAL_RESULTS: ReactNode[][] = [
     '87% pass both. Cost per pass $0.161 → $0.192, mean time 78 s → 110 s.',
     'Mostly one expensive case (search-notes). Within noise at 3 trials.',
   ],
+  [
+    'Hard review cases (7 bad, 3 good; tests pass, bug is subtle)',
+    'Haiku and Sonnet reviewers both 95% of bad patches caught, 0% false blocks. Haiku missed one subtle spec violation (unstripped text) in some trials; Sonnet did not.',
+    'Not saturated, but one case separates the models, at 3 trials. Suggestive only.',
+  ],
+  [
+    'Prompt caching on vs off',
+    'Cost per case down about 35–50% on every case (count-notes $0.119 → $0.066). 64–73% of input tokens were cache reads; outcomes unchanged.',
+    'Five cases, same direction, and a clear mechanism. The exact percentage is not precise at 3 trials.',
+  ],
 ]
 
 const LESSONS: ReactNode[][] = [
   ['Architect hit its step cap', 'The docs tool refused source files, so it kept searching', 'Tool design and step caps as a safety net: added read_file, budgeted the prompt'],
   ['Tests failed only on Windows', 'Child processes inherited the MCP server’s stdin', 'The subprocess environment is part of the harness: stdin=DEVNULL'],
-  ['A model sent a JSON string where an array belonged', 'Models break schemas', 'coerce_args decodes it; the recovery loop also worked but cost a call'],
+  ['A model sent a JSON string where an array belonged', 'Models break schemas', 'coerce_args decodes it (also single-quoted and nested forms); the recovery loop also worked but cost a call'],
+  ['Reviewer and Architect hit the same problem in their final answer', 'Repair only covered MCP tools, not the built-in submit tool', 'The loop now repairs the submission, and returns validation errors to the model as a failed tool result'],
+  ['Eval scorecards were wrong: cases were no-ops', 'Evals ran on the live repo by default, where merged PRs had already added the feature', 'EVAL_TOY_REPO_PATH, and the CLI refuses a repo that has a git remote'],
   ['“Add /health” ended as an error', 'The endpoint already existed, so the patch was empty', 'Nothing-to-do is a real outcome: the no_changes status'],
   ['An eval case started passing on the untouched repo', 'A merged PR had added the feature the case asked for', 'Evals run against a frozen clone; the grader-validation test caught it'],
   ['Killing the worker mid-run', 'The run stayed “running” forever', 'Leases and a recovery sweep; verified live: recovered in 60 s'],
@@ -316,9 +328,9 @@ const LIMIT_LIST = [
     things like code style.
   </>,
   <>
-    <strong>The review suite is saturated</strong> (100% on the cases we have), so it can no longer tell good prompts from
-    better ones. It needs harder cases. The held-out evidence is about four independent cases, so it is suggestive, not
-    conclusive.
+    <strong>The review suite is small.</strong> The original cases saturated at 100%, so ten harder ones were added; only one
+    of them currently separates the Haiku and Sonnet reviewers. Most evidence is a handful of independent cases at three
+    trials each, so it is suggestive, not conclusive.
   </>,
   <>
     <strong>The eval gate is manual.</strong> <C>evals compare</C> exits non-zero on a regression, but it is not wired into CI
@@ -330,8 +342,8 @@ const LIMIT_LIST = [
     cannot start Docker containers).
   </>,
   <>
-    <strong>Haiku-sized prompts barely benefit from prompt caching.</strong> Haiku 4.5 only caches prefixes of 4096 tokens or
-    more, so only the longer loops see savings.
+    <strong>Caching has a floor.</strong> Haiku 4.5 only caches prefixes of 4096 tokens or more, so very short loops do not
+    benefit. In practice the agent loops grow past that quickly, which is why measured savings were large.
   </>,
 ]
 
@@ -370,7 +382,7 @@ export default function About() {
             '4 MCP servers (2 custom, 2 official)',
             'Docker-sandboxed tests',
             '160+ automated tests',
-            'Eval suite: 5 coding + 13 review cases',
+            'Eval suite: 5 coding + 23 review cases',
             'Python · Flask · SQLite · React · Tailwind',
           ].map((t) => (
             <span key={t} className="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700">
@@ -591,7 +603,9 @@ export default function About() {
             items={[
               <>
                 The agent’s final answer is a call to a <strong>submit tool</strong> whose input is the typed result. If the
-                model stops without calling it, the harness nudges once.
+                model stops without calling it, the harness nudges up to twice. The submission is repaired against its schema, and if
+                it still fails validation the error goes back to the model as a failed tool call so it can fix it. Each fix costs a
+                step, so the step cap still bounds it.
               </>,
               <>
                 A hook sees every real tool result, so callers (Testing, Delivery) can record facts instead of trusting prose.
@@ -756,8 +770,8 @@ export default function About() {
         <Table head={['What happened', 'Why', 'What it taught / the fix']} rows={LESSONS} />
         <Callout tone="amber" title="Reading the eval numbers fairly">
           The review improvement (58% → 100% on held-out bad patches) comes from 12 trials, but those are four cases repeated
-          three times, so it is roughly four independent data points. It is encouraging, not proof. The review suite is now at
-          100% and needs harder cases before it can separate better prompts from good ones.
+          three times, so it is roughly four independent data points. It is encouraging, not proof. The harder cases that followed
+          are more informative, but one case separating two reviewers is still thin evidence.
         </Callout>
       </Section>
 

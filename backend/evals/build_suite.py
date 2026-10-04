@@ -10,6 +10,8 @@ decision a competent reviewer should reach).
 import json
 from pathlib import Path
 
+from hard_cases import HARD_REVIEW
+
 HERE = Path(__file__).parent
 
 # --- coding cases ------------------------------------------------------------------
@@ -610,9 +612,10 @@ REVIEW += [
 def main() -> None:
     for case in CODING:
         case["reference"] = REFERENCE[case["id"]]
-    suite = {"name": "toy-notes-v1", "cases": CODING, "review_cases": REVIEW}
+    review = REVIEW + HARD_REVIEW
+    suite = {"name": "toy-notes-v1", "cases": CODING, "review_cases": review}
     (HERE / "suite.json").write_text(json.dumps(suite, indent=2) + "\n", encoding="utf-8")
-    print(f"wrote suite.json: {len(CODING)} coding, {len(REVIEW)} review cases")
+    print(f"wrote suite.json: {len(CODING)} coding, {len(review)} review cases")
 
 
 if __name__ == "__main__":

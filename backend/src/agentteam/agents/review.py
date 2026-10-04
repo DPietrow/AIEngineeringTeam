@@ -68,6 +68,7 @@ class Review:
                 toolbox=toolbox,
                 max_steps=self.max_steps,
                 submit_tool=SUBMIT_VERDICT,
+                validate_submit=VerdictBody.model_validate,
             )
         if result.submitted is None:
             raise AgentError("reviewer finished without submitting a verdict")

@@ -9,6 +9,7 @@ show     print the scorecard of a saved run
 import argparse
 import dataclasses
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -36,7 +37,39 @@ def _print_result(r: CaseResult) -> None:
             print(f"         - {g.name}: {g.detail[:160]}", flush=True)
 
 
+def _remotes(repo: Path) -> list[str]:
+    out = subprocess.run(
+        ["git", "-C", str(repo), "remote"], capture_output=True, text=True, check=False
+    )
+    return out.stdout.split()
+
+
+def select_eval_repo(settings: Settings, *, allow_live: bool, fake: bool) -> Settings | str:
+    """Point the settings at the eval repo, or return an error message.
+
+    Real evals must run on a frozen clone with no remote: the live toy repo gains merged agent
+    PRs, which silently turns cases like 'add /notes/count' into no-ops and makes reviewers
+    flag duplicate routes. A repo with any git remote is treated as live.
+    """
+    repo = settings.eval_toy_repo_path or settings.toy_repo_path
+    if not repo or not Path(repo).is_dir():
+        return "No toy repo: set EVAL_TOY_REPO_PATH (or TOY_REPO_PATH) to a git repository."
+    if not fake and not allow_live and _remotes(Path(repo)):
+        return (
+            f"Refusing to run evals on {repo}: it has a git remote, so it looks like the live "
+            "repo, which accumulates merged PRs and invalidates cases. Point EVAL_TOY_REPO_PATH "
+            "at a frozen clone with its remote removed (see README), or pass --allow-live-repo."
+        )
+    return dataclasses.replace(settings, toy_repo_path=str(repo))
+
+
 def cmd_run(args: argparse.Namespace, settings: Settings) -> int:
+    chosen = select_eval_repo(settings, allow_live=args.allow_live_repo, fake=args.fake)
+    if isinstance(chosen, str):
+        print(chosen, file=sys.stderr)
+        return 2
+    settings = chosen
+    print(f"Toy repo: {settings.toy_repo_path}")
     suite = load_suite(args.suite)
     if args.variant:  # e.g. --variant review=v1 re-runs an older prompt for an A/B comparison
         os.environ["PROMPT_VARIANTS"] = ",".join(args.variant)
@@ -135,6 +168,11 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--sandbox", choices=["docker", "local"])
     r.add_argument("--max-cost", type=float, default=3.0, help="stop starting trials past this USD")
     r.add_argument("--keep-workspaces", action="store_true")
+    r.add_argument(
+        "--allow-live-repo",
+        action="store_true",
+        help="run even if the toy repo has a git remote (results may be invalid)",
+    )
     r.set_defaults(fn=cmd_run)
 
     c = sub.add_parser("compare")
