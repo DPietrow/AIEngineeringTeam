@@ -167,3 +167,4 @@ jobs:
           path: |
             backend/data/evals/ci-full-*.md
             backend/data/evals/ci-full-*.json
+# smoke test
