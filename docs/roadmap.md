@@ -72,6 +72,9 @@ while holding a lock on that run's row (`SELECT ... FOR UPDATE` on `runs`, incre
    script (or `pgloader`); convert timestamps and parse JSON text into `jsonb`.
 4. Reset sequences (`setval`) to the max copied id; backfill `events.seq` per run.
 5. Verify row counts and a checksum of `total_cost_usd`; run the API against Postgres.
+6. Update the About page (`frontend/src/AboutPage.tsx`, `about.ts`) and `README.md`: they
+   describe SQLite/WAL (overview "Database" row, tracing and append-only event-log wording,
+   hosting-plan bullet, "Single worker, SQLite" limit). Reword for Postgres once deployed.
 
 ### Hosting risk to resolve early: the sandbox
 
