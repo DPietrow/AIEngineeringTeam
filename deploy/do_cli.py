@@ -6,6 +6,7 @@
     python deploy/do_cli.py down          snapshot, verify, then DESTROY the server (stops billing)
     python deploy/do_cli.py status        what exists, and what it costs while idle
     python deploy/do_cli.py idle-check    exit 0 if the server is idle; --shutdown-after MIN acts
+    python deploy/do_cli.py backup        download a verified copy of the database
     python deploy/do_cli.py ssh           open a shell on the server
     python deploy/do_cli.py destroy-all   delete the server AND every snapshot (--yes)
 
@@ -23,9 +24,12 @@ deploy/README.md. The server's own settings live in deploy/.env.server.
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import os
 import shlex
+import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -178,6 +182,7 @@ class DigitalOcean:
 class Shell(Protocol):
     def run(self, ip: str, command: str, *, check: bool = True, timeout: int = 600) -> str: ...
     def upload(self, ip: str, local: Path, remote: str) -> None: ...
+    def download(self, ip: str, remote: str, local: Path) -> None: ...
     def wait_ready(self, ip: str, timeout: int = 300) -> None: ...
 
 
@@ -213,6 +218,14 @@ class SshShell:
         if proc.returncode != 0:
             raise DeployError(f"scp failed: {proc.stderr}")
 
+    def download(self, ip: str, remote: str, local: Path) -> None:
+        cmd = ["scp", *self._opts(), f"root@{ip}:{remote}", str(local)]
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900
+        )
+        if proc.returncode != 0:
+            raise DeployError(f"scp download failed: {proc.stderr}")
+
     def wait_ready(self, ip: str, timeout: int = 300) -> None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -237,6 +250,29 @@ def http_json(
         req.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (https/http only)
         return json.loads(resp.read())
+
+
+REMOTE_DB = "/var/lib/agentteam/agentteam.db"
+
+
+def check_database(path: Path) -> None:
+    """Raises unless `path` is an intact SQLite database holding this app's tables."""
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            result = conn.execute("PRAGMA integrity_check").fetchone()[0]
+            tables = {
+                r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        raise DeployError(f"the downloaded backup is not a readable database: {e}") from e
+    if result != "ok":
+        raise DeployError(f"the downloaded backup failed its integrity check: {result}")
+    missing = {"runs", "spans", "events"} - tables
+    if missing:
+        raise DeployError(f"the downloaded backup is missing tables: {sorted(missing)}")
 
 
 def normalized_env(path: Path) -> Path:
@@ -582,6 +618,50 @@ class Ops:
             self.down()
         return idle
 
+    def backup(self, out_dir: Path | None = None) -> Path:
+        """Downloads a consistent, integrity-checked copy of the SQLite database."""
+        d = self.droplet()
+        ip = self.ip_of(d) if d else None
+        if not d or not ip or d["status"] != "active":
+            raise DeployError(
+                "the server is not running, so there is nothing to copy from. Run `up` first "
+                "(a stopped server's data is safe in its snapshot)."
+            )
+        out_dir = out_dir or HERE / "backups"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        remote = "/tmp/agentteam-backup.db"
+        # SQLite's own backup API gives a consistent copy even while a run is writing. It runs as
+        # the service user so no root-owned -wal/-shm files are ever created next to the database.
+        code = (
+            "import sqlite3;"
+            f"s=sqlite3.connect({REMOTE_DB!r});"
+            f"d=sqlite3.connect({remote!r});s.backup(d);d.close();s.close()"
+        )
+        self.log("asking the server for a consistent copy of the database")
+        self.shell.run(
+            ip,
+            f"set -e; umask 077; rm -f {remote} {remote}.gz; "
+            f"runuser -u agentteam -- /opt/agentteam/venv/bin/python -c {shlex.quote(code)}; "
+            f"gzip -f {remote}",
+            timeout=300,
+        )
+        target = out_dir / f"agentteam-{now_stamp()}.db"
+        gz = target.with_suffix(".db.gz")
+        try:
+            self.shell.download(ip, f"{remote}.gz", gz)
+            with gzip.open(gz, "rb") as src, open(target, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+        finally:
+            gz.unlink(missing_ok=True)
+            self.shell.run(ip, f"rm -f {remote} {remote}.gz", check=False)
+        try:
+            check_database(target)
+        except DeployError:
+            target.unlink(missing_ok=True)
+            raise
+        self.log(f"backup saved and verified: {target} ({target.stat().st_size // 1024} KB)")
+        return target
+
     def destroy_all(self) -> None:
         d = self.droplet()
         if d:
@@ -635,6 +715,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", help="show the droplet, snapshots and costs")
     idle = sub.add_parser("idle-check", help="exit 0 when idle; optionally shut down")
     idle.add_argument("--shutdown-after", type=float, metavar="MINUTES")
+    bak = sub.add_parser("backup", help="download a verified copy of the database")
+    bak.add_argument("--out", type=Path, help="folder to save into (default: deploy/backups)")
     sub.add_parser("ssh", help="open a shell on the server")
     destroy = sub.add_parser("destroy-all", help="delete the droplet and ALL snapshots")
     destroy.add_argument("--yes", action="store_true")
@@ -656,6 +738,8 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(ops.status(), indent=2))
         elif args.command == "idle-check":
             return 0 if ops.idle_check(args.shutdown_after) else 1
+        elif args.command == "backup":
+            ops.backup(args.out)
         elif args.command == "ssh":
             d = ops.droplet()
             if not d or not ops.ip_of(d):

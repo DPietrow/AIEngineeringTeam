@@ -30,3 +30,6 @@ backend/data/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Database backups downloaded by deploy/do_cli.py backup
+deploy/backups/
