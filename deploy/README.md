@@ -62,6 +62,19 @@ run in progress and no run activity or authenticated dashboard request for that 
 server's `GET /api/idle`, which itself does not count as activity). A run waiting at the
 approval gate does not block shutdown: its state is in the snapshot.
 
+## Backups
+
+```powershell
+python deploy\do_cli.py backup              # while the server is up
+```
+
+It asks SQLite itself for a consistent copy (safe while a run is going), compresses it, downloads
+it to `deploy/backups/agentteam-<timestamp>.db` (git-ignored), and checks the copy with
+`PRAGMA integrity_check` before keeping it. The server is not touched or stopped. If the server is
+off, `up` first. To restore a backup onto a server: stop the services, copy the file to
+`/var/lib/agentteam/agentteam.db` (owner `agentteam`), delete any `-wal`/`-shm` files next to it,
+start the services. Keep backups somewhere that is not only this machine.
+
 ## Auto-deploy from `main`
 
 `.github/workflows/deploy-main.yml` ships every commit that passes CI on `main` to the running
@@ -87,8 +100,10 @@ Deploys and idle shutdowns share one concurrency group so they never overlap.
 
 ## Known limits
 
-- First deployment uses SQLite on the droplet's disk (single server, one API process). The
-  Postgres cutover is documented in `docs/roadmap.md`.
+- The database is SQLite on the droplet's disk (single server, one API process), by design. The
+  Postgres plan is in `docs/roadmap.md` for the day that stops being enough.
+- Your history exists only on that disk (and in the snapshots). Run `do_cli.py backup` now and
+  then; see "Backups".
 - The rate limits and login lockout are in memory, so the API runs as one process (many threads).
 - If a restored droplet fails to come up, `do_cli.py ssh` and check `systemctl status
   agentteam-api agentteam-worker caddy`. The snapshot is untouched, so you can always try again.

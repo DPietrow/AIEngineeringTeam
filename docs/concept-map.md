@@ -77,10 +77,10 @@ Last updated: 2026-10-03 (after the eval harness).
 | Crash recovery | Expired leases are swept: `running` becomes `error` (re-running would repeat spend on a half-built workspace); `delivering` returns to `approved` (the human already decided; push is idempotent) | `tracing.py` `recover_orphans` | Done |
 | Don't leave the trace lying | Spans a dead worker left "running" are closed as errors | `tracing.py` `recover_orphans` | Done |
 | Recovery is idempotent and conservative | Runs without a lease (eval harness, tests) are never touched; recovering twice is a no-op | `tracing.py` | Done |
-| Schema evolution | Columns added to existing databases by an idempotent migration; becomes real migrations at the Postgres cutover | `db.py` `_migrate` | Done |
+| Schema evolution | Columns added to existing databases by an idempotent migration; would become real migrations if Postgres is ever adopted | `db.py` `_migrate` | Done |
 | Exclusive claims under contention | The claim is one `BEGIN IMMEDIATE` transaction (select oldest pending + update), so 4 racing threads and 3 real OS processes each claim every run exactly once. Same for delivery claims and for concurrent recovery sweeps (each orphan recovered once) | `tracing.py`, `db.py` `write_tx`, `tests/test_multiworker.py` | Done |
 | Lease fencing (zombie workers) | A worker that stalls past its lease (laptop sleep, paused VM) is recovered by another worker's sweep; when it wakes it must not finish the run it lost. The heartbeat flags a failed renewal, `check_deadline` then raises `LeaseLost` at the next safe point (including just before the irreversible git push), and `set_run_status` is a conditional write (`AND claimed_by = me`) so even the window before the first missed heartbeat cannot overwrite the new owner. The orchestrator abandons the run silently | `deadline.py` `Fence`, `tracing.py` `set_run_status`, `orchestrator.py` | Done |
-| Known limit: SQLite is the multi-worker ceiling | Writers serialise on one lock. Fine for a handful of workers; Postgres removes it. Two workers idle at once may both tidy a rejected run's workspace (idempotent, a duplicate event) | `db.py` | Accepted |
+| Known limit: SQLite is the multi-worker ceiling | Writers serialise on one lock. Fine for a handful of workers; Postgres would remove it. Two workers idle at once may both tidy a rejected run's workspace (idempotent, a duplicate event) | `db.py` | Accepted |
 
 ### Resource hygiene
 
@@ -199,7 +199,7 @@ Last updated: 2026-10-03 (after the eval harness).
 |---|---|---|---|
 | CI | Lint, format check and tests on every push | `.github/workflows/ci.yml` | Done |
 | Test pyramid for agents | Unit tests with fakes, integration with real subprocesses, manual real-model smoke | `backend/tests/` | Done |
-| Hosted database | SQLite to Postgres for multi-process hosting | see `docs/roadmap.md` | Planned |
+| Hosted database | Decision: stay on SQLite (one server, one user); the Postgres plan, including the event-ordering hazard for SSE cursors, is written down for the day it is needed. Durability through snapshots plus `do_cli.py backup` (integrity-checked download) | `docs/roadmap.md`, `deploy/do_cli.py` | Decided: not building |
 | Hosted deployment | One DigitalOcean droplet: Caddy (TLS, static dashboard, unbuffered SSE proxy), gunicorn (one process, many threads, because limits are in memory and streams hold threads), worker, Docker sandbox; hardened systemd units, ufw, key-only SSH | `deploy/` | Done: fresh install, snapshot, restore and re-point DNS verified live (2026-10-04) |
 | Cost control for infrastructure | A powered-off cloud VM is still billed, so "off" means snapshot, verify, delete; "on" means restore and re-point DNS. Safety rules (never delete before the snapshot is listed, refuse while a run is active, only touch tagged resources) are unit-tested against a fake API and mutation-checked | `deploy/do_cli.py`, `tests/test_deploy_cli.py` | Done |
 | Idle detection | `/api/idle` reports active runs and minutes since last run activity or authenticated dashboard request; the probe itself is excluded so a monitor cannot keep the server awake | `api.py`, `app.py`, `.github/workflows/idle-shutdown.yml` | Done (opt-in) |

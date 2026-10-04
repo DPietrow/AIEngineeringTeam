@@ -103,7 +103,11 @@ class FakeShell:
     def __init__(self):
         self.commands: list[str] = []
         self.uploads: list[str] = []
+        self.downloads: list[str] = []
         self.stop_fails = False
+        self.corrupt = False
+        self.tables = ("runs", "spans", "events")
+        self.workdir = "."
 
     def run(self, ip, command, *, check=True, timeout=600):
         self.commands.append(command)
@@ -113,6 +117,24 @@ class FakeShell:
 
     def upload(self, ip, local, remote):
         self.uploads.append(remote)
+
+    def download(self, ip, remote, local):
+        self.downloads.append(remote)
+        local.write_bytes(self.backup_payload())
+
+    def backup_payload(self) -> bytes:
+        import gzip
+        import sqlite3
+
+        tmp = Path(self.workdir) / "src.db"
+        conn = sqlite3.connect(tmp)
+        for table in self.tables:
+            conn.execute(f"CREATE TABLE {table} (id INTEGER)")
+        conn.commit()
+        conn.close()
+        return (
+            gzip.compress(tmp.read_bytes()) if not self.corrupt else gzip.compress(b"not a db" * 50)
+        )
 
     def wait_ready(self, ip, timeout=300):
         pass
@@ -481,3 +503,57 @@ def test_a_windows_env_file_is_uploaded_with_unix_line_endings(tmp_path):
     env.write_bytes(b"\xef\xbb\xbfAPI_PASSWORD=abc\r\nJWT_SECRET=xyz\r\n")
     fixed = do_cli.normalized_env(env).read_bytes()
     assert fixed == b"API_PASSWORD=abc\nJWT_SECRET=xyz\n"
+
+
+# --- backup ----------------------------------------------------------------------------------
+
+
+def backup_shell(tmp_path, **kw):
+    shell = FakeShell()
+    shell.workdir = str(tmp_path)
+    for k, v in kw.items():
+        setattr(shell, k, v)
+    return shell
+
+
+def test_backup_downloads_verifies_and_cleans_up_the_server_copy(tmp_path):
+    api = FakeDO()
+    api.add_droplet()
+    shell = backup_shell(tmp_path)
+    saved = make_ops(api, shell=shell).backup(tmp_path / "out")
+    assert saved.exists() and saved.suffix == ".db"
+    do_cli.check_database(saved)
+    assert shell.downloads == ["/tmp/agentteam-backup.db.gz"]
+    # taken by SQLite's backup API, as the service user (never as root), then removed again
+    first, last = shell.commands[0], shell.commands[-1]
+    assert "runuser -u agentteam" in first and "s.backup(d)" in first and "umask 077" in first
+    assert last.startswith("rm -f /tmp/agentteam-backup.db")
+    assert not list((tmp_path / "out").glob("*.gz"))
+
+
+def test_backup_rejects_and_deletes_a_corrupt_download(tmp_path):
+    api = FakeDO()
+    api.add_droplet()
+    shell = backup_shell(tmp_path, corrupt=True)
+    with pytest.raises(do_cli.DeployError, match="not a readable database|integrity"):
+        make_ops(api, shell=shell).backup(tmp_path / "out")
+    assert not list((tmp_path / "out").glob("*"))
+
+
+def test_backup_rejects_a_database_without_the_apps_tables(tmp_path):
+    api = FakeDO()
+    api.add_droplet()
+    shell = backup_shell(tmp_path, tables=("something_else",))
+    with pytest.raises(do_cli.DeployError, match="missing tables"):
+        make_ops(api, shell=shell).backup(tmp_path / "out")
+    assert not list((tmp_path / "out").glob("*"))
+
+
+def test_backup_needs_a_running_server(tmp_path):
+    api = FakeDO()
+    with pytest.raises(do_cli.DeployError, match="not running"):
+        make_ops(api, shell=backup_shell(tmp_path)).backup(tmp_path / "out")
+    did = api.add_droplet()
+    api.droplets[did]["status"] = "off"
+    with pytest.raises(do_cli.DeployError, match="not running"):
+        make_ops(api, shell=backup_shell(tmp_path)).backup(tmp_path / "out")

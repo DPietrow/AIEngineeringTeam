@@ -23,18 +23,28 @@ Last updated: 2026-10-04 (deployment scripts built).
    record `evals/baselines/full.json` from a clean full run; hardened redaction, runbook. Done: multi-worker tests and lease fencing (found and fixed a real
    stalled-worker overwrite bug), API authentication (password to JWT, rate limits, CORS allowlist,
    authenticated fetch-based live streaming).
-6. Hosted deployment, including the Postgres cutover below. Decided: **DigitalOcean**, one
+6. Hosted deployment. Decided: **DigitalOcean**, one
    droplet (Caddy + gunicorn + worker + Docker). **Scripts built** (`deploy/`): provisioning,
    release, systemd units, Caddy, `do_cli.py up/down/deploy/status`, snapshot-then-destroy
    spin-down (a powered-off droplet is still billed), opt-in idle auto-shutdown workflow. **Verified live** at
    https://agentteam.aiengineering.team: fresh install, a full run through the approval gate, `down`
    (snapshot, verify, delete) and `up` (restore, DNS, redeploy). Still to do: turn on auto-deploy
-   and idle shutdown, then the Postgres cutover.
+   and idle shutdown. **Postgres cutover: decided against** (see below).
 
-## Postgres cutover (SQLite to a hosted database)
+## Postgres cutover (SQLite to a hosted database): decided against, kept as a plan
 
-Goal: when moving to Render (or similar), replace SQLite with Postgres without changing agent
-behaviour. The design already helps: all SQL lives in four files, `db.py`, `tracing.py`,
+Decision (2026-10-04): not building this. The deployment is one droplet with one API process and
+one worker, used by one person as a case study. SQLite handles that comfortably (tens of runs are a
+few thousand rows), the snapshot carries the database across spin-downs (verified live), and a
+second database engine would double the surface to test and maintain for no benefit here. The risk
+that remains is durability, since the history lives on one disk: `do_cli.py backup` downloads a
+verified copy.
+
+Build this only if one of these becomes true: more than one server must share state, a managed
+database is required (backups, point-in-time recovery), or write contention shows up in practice.
+The rest of this section is the plan, written so the move stays a bounded job.
+
+Goal: replace SQLite with Postgres without changing agent behaviour. The design already helps: all SQL lives in four files, `db.py`, `tracing.py`,
 `budget.py` and `evals/store.py`. Keep it that way. Do not put SQL anywhere else.
 
 ### Prep work to do before the cutover (cheap, do while building)
@@ -83,9 +93,9 @@ while holding a lock on that run's row (`SELECT ... FOR UPDATE` on `runs`, incre
    script (or `pgloader`); convert timestamps and parse JSON text into `jsonb`.
 4. Reset sequences (`setval`) to the max copied id; backfill `events.seq` per run.
 5. Verify row counts and a checksum of `total_cost_usd`; run the API against Postgres.
-6. Update the About page (`frontend/src/AboutPage.tsx`, `about.ts`) and `README.md`: they
+6. Update the About page (`frontend/src/AboutPage.tsx`) and `README.md`: they
    describe SQLite/WAL (overview "Database" row, tracing and append-only event-log wording,
-   hosting-plan bullet, "Single worker, SQLite" limit). Reword for Postgres once deployed.
+   hosting bullet, "SQLite, single user" limit). Reword for Postgres if this is ever built.
 
 ### Hosting risk to resolve early: the sandbox
 

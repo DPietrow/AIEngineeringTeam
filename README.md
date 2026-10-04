@@ -103,7 +103,7 @@ uv run python -m agentteam.worker                   # terminal 2: worker
   different run; claims are exclusive, tested with threads and real processes). A worker that
   stalls past its lease and then wakes up stops at its next safe point and writes nothing, so it
   cannot overwrite the worker that took its run over. SQLite serialises writes, so a handful of
-  workers is fine; more than that is a reason to move to Postgres. Mind your API rate limits and
+  workers is fine; more than that would be a reason to move to Postgres (see `docs/roadmap.md`). Mind your API rate limits and
   spend caps: the spend caps are shared through the database, but the model's rate limit is not.
 
 ### Cleanup
@@ -199,16 +199,17 @@ not in use. `python deploy\do_cli.py up` creates the server (restoring the newes
 there is one), `deploy` ships committed code, and `down` snapshots the disk, verifies the
 snapshot and then deletes the droplet, because a powered-off droplet is still billed. An opt-in
 workflow (`idle-shutdown.yml`) does the same automatically when nothing has happened for an hour.
-Another opt-in workflow (`deploy-main.yml`) deploys each commit that passes CI on `main`, like Vercel/Render. Runbook, costs and safety rules: `deploy/README.md`. The first deployment uses SQLite on the
-droplet's disk; the Postgres cutover follows (`docs/roadmap.md`).
+Another opt-in workflow (`deploy-main.yml`) deploys each commit that passes CI on `main`, like Vercel/Render. Runbook, costs and safety rules: `deploy/README.md`. The database is SQLite on the
+droplet's disk, on purpose: one server, one user. Back it up to your own machine with
+`python deploy\do_cli.py backup`. The Postgres scale-up plan is kept in `docs/roadmap.md`.
 
 ## Docs
 
 - `docs/concept-map.md`: every component mapped to harness-engineering and LLMOps concepts
-- `docs/roadmap.md`: what is left, including the SQLite to Postgres cutover plan
+- `docs/roadmap.md`: what is left, and the (deliberately unbuilt) SQLite to Postgres scale-up plan
 
 ## Status
 
 Built: tracing core, SSE streaming, Architect/Implementation/Testing/Review agents, MCP tool
 scoping, Docker sandbox, orchestrator state machine, eval harness, React trace dashboard,
-Delivery agent with a human PR gate. Also built: resilience, auth, multi-worker safety, CI eval gate, DigitalOcean deployment scripts with spin-down. Next: first live deploy, Postgres cutover.
+Delivery agent with a human PR gate. Also built: resilience, auth, multi-worker safety, CI eval gate, DigitalOcean deployment scripts with spin-down. Deployed and verified live. Remaining work is optional (see `docs/roadmap.md`).

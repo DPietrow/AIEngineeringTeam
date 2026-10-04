@@ -342,8 +342,10 @@ const LIMIT_LIST = [
     <strong>SQLite, single user.</strong> Several workers are supported and tested (exclusive claims, recovery, and a stalled
     worker that wakes up cannot overwrite the worker that took its run), but SQLite serialises writes, so a handful is the
     ceiling. Authentication is one shared password with no accounts or roles, and tokens last a year, so a leaked one stays
-    valid until the signing secret is rotated; login and rate limits are in memory per API process. Hosting means Postgres
-    and a different sandbox (managed hosts cannot start Docker containers).
+    valid until the signing secret is rotated; login and rate limits are in memory per API process, so the API runs as one
+    process. SQLite is a deliberate choice for a single-user deployment on one server; moving to several servers or a
+    managed database would mean Postgres (the plan is written down) and the sandbox would need a host that can start Docker
+    containers, which most managed platforms cannot.
   </>,
   <>
     <strong>Caching has a floor.</strong> Haiku 4.5 only caches prefixes of 4096 tokens or more, so very short loops do not
@@ -770,8 +772,10 @@ export default function About() {
                 fake GitHub MCP server and a local bare git remote, so the whole pipeline is exercised offline.
               </>,
               <>
-                <strong>Hosting plan:</strong> a written SQLite-to-Postgres cutover, including the event-ordering hazard and why
-                the sandbox cannot run on a typical managed host.
+                <strong>Hosting:</strong> one DigitalOcean droplet runs everything (Caddy for HTTPS, the API, the worker and Docker
+                for the sandbox), because managed platforms cannot start containers. It is switched off by snapshotting the disk,
+                verifying the snapshot and deleting the droplet, since a powered-off droplet is still billed. SQLite is kept on
+                purpose; a written Postgres plan (including the event-ordering hazard) covers the day it stops being enough.
               </>,
             ]}
           />
