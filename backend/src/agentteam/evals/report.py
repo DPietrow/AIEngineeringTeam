@@ -38,6 +38,10 @@ def scorecard(run: dict[str, Any]) -> str:
             f"- mean duration {c['mean_duration_s']}s  |  mean LLM calls {c['mean_llm_calls']}  |  "
             f"retry rate {_pct(c['retry_rate'])}",
         ]
+        if c.get("cache_read_share") is not None:
+            lines.append(
+                f"- prompt cache: {_pct(c['cache_read_share'])} of input tokens were reads"
+            )
         if c["failed_graders"]:
             lines.append(f"- failed graders: {c['failed_graders']}")
         lines += [

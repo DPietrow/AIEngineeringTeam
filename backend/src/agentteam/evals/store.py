@@ -101,6 +101,8 @@ def run_metrics(db_path: str | Path, run_id: str) -> dict[str, Any]:
         ).fetchone()
         agg = conn.execute(
             "SELECT COALESCE(SUM(input_tokens), 0) AS tin, COALESCE(SUM(output_tokens), 0) AS tout, "
+            "COALESCE(SUM(cache_read_tokens), 0) AS cread, "
+            "COALESCE(SUM(cache_write_tokens), 0) AS cwrite, "
             "SUM(CASE WHEN kind = 'llm' THEN 1 ELSE 0 END) AS llm_calls, "
             "SUM(CASE WHEN kind = 'mcp' THEN 1 ELSE 0 END) AS tool_calls, "
             "SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_spans "
@@ -133,6 +135,8 @@ def run_metrics(db_path: str | Path, run_id: str) -> dict[str, Any]:
         "cost_usd": float(run["total_cost_usd"]) if run else 0.0,
         "tokens_in": int(agg["tin"] or 0),
         "tokens_out": int(agg["tout"] or 0),
+        "cache_read_tokens": int(agg["cread"] or 0),
+        "cache_write_tokens": int(agg["cwrite"] or 0),
         "llm_calls": int(agg["llm_calls"] or 0),
         "tool_calls": int(agg["tool_calls"] or 0),
         "error_spans": int(agg["error_spans"] or 0),

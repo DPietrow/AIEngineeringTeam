@@ -86,7 +86,7 @@ def run_coding_case(
 ) -> CaseResult:
     # Evals must never open real PRs or park at the human gate: switch delivery off.
     settings = dataclasses.replace(settings, github_token=None)
-    run_id = tracer.create_run(case.task, config_hash=config_hash(settings.llm_model))
+    run_id = tracer.create_run(case.task, config_hash=config_hash(settings.model_signature))
     # Mark running directly: claim_next_run() could steal an unrelated pending run.
     tracer.set_run_status(run_id, "running")
     Orchestrator(tracer, llm, settings).execute(run_id, case.task)
@@ -238,7 +238,14 @@ def summarize(results: list[CaseResult]) -> dict[str, Any]:
         passes = sum(r.passed for r in coding)
         total_cost = sum(r.metrics.get("cost_usd", 0.0) for r in coding)
         failing = Counter(g.name for r in coding for g in r.grades if g.required and not g.passed)
+        reads = sum(r.metrics.get("cache_read_tokens", 0) for r in coding)
+        writes = sum(r.metrics.get("cache_write_tokens", 0) for r in coding)
+        uncached = sum(r.metrics.get("tokens_in", 0) for r in coding)
         out["coding"] = {
+            # Share of all input tokens that were served from the prompt cache.
+            "cache_read_share": round(reads / (reads + writes + uncached), 3)
+            if (reads + writes + uncached)
+            else None,
             "cases": len(by_case),
             "trials": len(coding),
             "pass_rate": passes / len(coding),
@@ -336,8 +343,8 @@ def run_eval(
         label=label,
         suite=suite.name,
         suite_hash=suite.hash,
-        config_hash=config_hash(settings.llm_model),
-        model=llm.model,
+        config_hash=config_hash(settings.model_signature),
+        model=llm.model_label,
         trials=trials,
         started_at=_now(),
     )

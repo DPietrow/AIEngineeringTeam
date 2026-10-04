@@ -30,15 +30,22 @@ def build_llm(tracer: Tracer, settings: Settings) -> LLM:
         if not settings.anthropic_api_key:
             raise SystemExit("LLM_MODE=anthropic but ANTHROPIC_API_KEY is not set")
         register_secret(settings.anthropic_api_key)
-        log.info("LLM: Anthropic %s", settings.llm_model)
-        return AnthropicLLM(
+        llm = AnthropicLLM(
             tracer,
             api_key=settings.anthropic_api_key,
             model=settings.llm_model,
+            model_overrides=dict(settings.model_overrides),
+            prompt_caching=settings.prompt_caching,
             max_retries=settings.llm_max_retries,
             retry_base_delay_s=settings.llm_retry_base_delay_s,
             timeout_s=settings.llm_timeout_s,
         )
+        log.info(
+            "LLM: Anthropic %s, prompt caching %s",
+            llm.model_label,
+            "on" if settings.prompt_caching else "off",
+        )
+        return llm
     log.warning("LLM: FAKE mode (no API key). Runs use canned responses and cost nothing.")
     return FakeLLM(tracer)
 
@@ -133,7 +140,7 @@ def main() -> None:
     log.info(
         "worker ready (db=%s, config=%s, delivery=%s)",
         settings.database_path,
-        config_hash(settings.llm_model),
+        config_hash(settings.model_signature),
         f"on -> {settings.github_repo}" if settings.delivery_enabled else "off",
     )
     worker_id = f"{socket.gethostname()}:{os.getpid()}"

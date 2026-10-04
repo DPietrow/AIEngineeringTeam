@@ -127,6 +127,8 @@ class SpanHandle:
         self.model: str | None = None
         self.input_tokens: int | None = None
         self.output_tokens: int | None = None
+        self.cache_read_tokens: int | None = None
+        self.cache_write_tokens: int | None = None
         self.cost_usd: float = 0.0
 
     def set_output(self, value: Any) -> None:
@@ -138,13 +140,23 @@ class SpanHandle:
         model: str,
         input_tokens: int,
         output_tokens: int,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
         cost_usd: float | None = None,
     ) -> None:
+        """`input_tokens` is UNCACHED input only; cache reads/writes are tracked separately
+        because they are priced differently (see pricing.py)."""
         self.model = model
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
+        self.cache_read_tokens = cache_read_tokens
+        self.cache_write_tokens = cache_write_tokens
         self.cost_usd = (
-            cost_usd if cost_usd is not None else compute_cost(model, input_tokens, output_tokens)
+            cost_usd
+            if cost_usd is not None
+            else compute_cost(
+                model, input_tokens, output_tokens, cache_write_tokens, cache_read_tokens
+            )
         )
 
 
@@ -473,13 +485,15 @@ class Tracer:
             "model": handle.model,
             "input_tokens": handle.input_tokens,
             "output_tokens": handle.output_tokens,
+            "cache_read_tokens": handle.cache_read_tokens,
+            "cache_write_tokens": handle.cache_write_tokens,
             "cost_usd": handle.cost_usd,
         }
         with write_tx(self.db_path) as conn:
             conn.execute(
                 "UPDATE spans SET status = ?, ended_at = ?, duration_ms = ?, output = ?, "
                 "error = ?, traceback = ?, model = ?, input_tokens = ?, output_tokens = ?, "
-                "cost_usd = ? WHERE id = ?",
+                "cache_read_tokens = ?, cache_write_tokens = ?, cost_usd = ? WHERE id = ?",
                 (
                     status,
                     _now(),
@@ -490,6 +504,8 @@ class Tracer:
                     handle.model,
                     handle.input_tokens,
                     handle.output_tokens,
+                    handle.cache_read_tokens,
+                    handle.cache_write_tokens,
                     handle.cost_usd,
                     handle.id,
                 ),

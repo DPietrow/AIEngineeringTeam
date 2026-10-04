@@ -45,6 +45,18 @@ uv run python -m agentteam.worker                   # terminal 2: worker
 # terminal 3: submit a task, then stream http://127.0.0.1:5000/api/runs/<id>/events
 ```
 
+### Cost controls
+
+- **Prompt caching** (`PROMPT_CACHING`, on by default): each agent turn marks the end of the
+  conversation as a cache breakpoint, so the next turn re-reads the earlier prefix at 0.1x the
+  input price. Haiku 4.5 only caches prefixes of 4096+ tokens, so only the longer loops
+  (Implementation, Review of big diffs) benefit; the dashboard shows "N cached" on LLM spans and
+  eval scorecards show the share of input tokens served from cache.
+- **Per-agent models** (`MODEL_REVIEW=claude-sonnet-5-5`, etc.): put a stronger model only where
+  it pays. Each call is priced by its own model, and the run's config hash includes the setup.
+  Measure before adopting: `uv run python -m agentteam.evals run --only review --label review-sonnet`
+  then `compare` against a Haiku baseline.
+
 ### Resilience
 
 - **API retries:** 429, 5xx (incl. 529 overloaded), timeouts and dropped connections are retried

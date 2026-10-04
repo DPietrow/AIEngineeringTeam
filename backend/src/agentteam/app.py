@@ -10,7 +10,8 @@ def create_app(config: dict | None = None) -> Flask:
     app = Flask(__name__)
     settings = Settings.from_env()
     app.config["DATABASE_PATH"] = settings.database_path
-    app.config["LLM_MODEL"] = settings.llm_model
+    # Hashed into each run's config hash; includes per-agent overrides when there are any.
+    app.config["LLM_MODEL"] = settings.model_signature
     app.config["DELIVERY_ENABLED"] = settings.delivery_enabled
     if config:
         app.config.update(config)

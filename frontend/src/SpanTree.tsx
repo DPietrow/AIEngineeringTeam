@@ -3,6 +3,9 @@ import type { Span } from './types'
 import { duration, usd } from './format'
 import { StatusBadge } from './ui'
 
+/** "claude-haiku-4-5-20251001" -> "haiku-4-5"; "claude-sonnet-5-5" -> "sonnet-5-5". */
+const shortModel = (m: string) => m.replace(/^claude-/, '').replace(/-\d{8}$/, '')
+
 interface Node {
   span: Span
   children: Node[]
@@ -35,6 +38,10 @@ function Row({ node, depth }: { node: Node; depth: number }) {
         <span className="rounded bg-slate-100 px-1.5 text-xs text-slate-500">{s.kind}</span>
         <StatusBadge status={s.status} />
         <span className="ml-auto flex gap-3 text-xs tabular-nums text-slate-500">
+          {s.model && s.kind === 'llm' && <span className="text-slate-400">{shortModel(s.model)}</span>}
+          {(s.cache_read_tokens ?? 0) > 0 && (
+            <span className="text-emerald-700">{s.cache_read_tokens} cached</span>
+          )}
           {tokens > 0 && <span>{tokens} tok</span>}
           {s.cost_usd != null && s.cost_usd > 0 && <span>{usd(s.cost_usd)}</span>}
           <span>{s.ended_at ? duration(s.duration_ms) : 'running...'}</span>
@@ -42,7 +49,13 @@ function Row({ node, depth }: { node: Node; depth: number }) {
       </button>
       {open && (
         <div className="mb-1 space-y-2 border-l-2 border-slate-200 py-2 pr-2 text-xs" style={{ marginLeft: depth * 16 + 20, paddingLeft: 8 }}>
-          {s.model && <div className="text-slate-500">model: {s.model}</div>}
+          {s.model && (
+            <div className="text-slate-500">
+              model: {s.model}
+              {s.input_tokens != null &&
+                ` · input ${s.input_tokens} uncached, ${s.cache_read_tokens ?? 0} cache read, ${s.cache_write_tokens ?? 0} cache write · output ${s.output_tokens ?? 0}`}
+            </div>
+          )}
           {s.callsite_file && (
             <div className="text-slate-500">
               {s.callsite_file}:{s.callsite_line}

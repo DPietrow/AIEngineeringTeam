@@ -53,7 +53,7 @@ def cmd_run(args: argparse.Namespace, settings: Settings) -> int:
     case_ids = set(args.cases.split(",")) if args.cases else None
     print(
         f"Suite {suite.name} ({len(suite.coding)} coding, {len(suite.review)} review) "
-        f"hash={suite.hash}, trials={args.trials}, model={llm.model}"
+        f"hash={suite.hash}, trials={args.trials}, model={llm.model_label}"
     )
     report = run_eval(
         settings,

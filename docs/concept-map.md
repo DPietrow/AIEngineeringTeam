@@ -48,6 +48,20 @@ Last updated: 2026-10-03 (after the eval harness).
 | Least-privilege credential | Fine-grained PAT limited to one repo (Contents + Pull requests); passed by env var, never argv; scrubbed by `register_secret` and redaction | `.env.example`, `workspace.py`, `worker.py` | Done |
 | Offline testing of external integrations | Fake MCP server stands in for GitHub; a local bare repo stands in for the remote | `tests/fake_github_server.py`, `tests/test_delivery.py` | Done |
 
+### Cost and performance optimisation
+
+| Concept | What it means | Component | Status |
+|---|---|---|---|
+| Prompt caching (prefix reuse) | The API caches `tools + system + messages` up to a breakpoint; later calls with the same prefix read it at 0.1x. In an agent loop the prefix grows every turn, so the breakpoint moves to the newest block each call | `llm.py` `with_cache_breakpoint` | Done |
+| Don't mutate the history | Breakpoint is added to a copy sent to the API; stored messages and traces stay clean and the 4-breakpoint limit is never approached | `llm.py` | Done |
+| Cache economics are in the cost model | Writes cost 1.25x, reads 0.1x (0.05x Opus 5.5, 0.025x Fable 5.1); `input_tokens` from the API is uncached only, so cost is summed from all three | `pricing.py` `compute_cost` | Done |
+| Know the limits | Haiku 4.5 caches only prefixes of 4096+ tokens; shorter ones silently skip caching, so short loops see no savings. Sonnet-class models cache earlier | `.env.example`, README | Documented |
+| Cache observability | Cache read/write tokens stored per span, shown as "N cached" in the trace and as a cache-read share on eval scorecards | `db.py`, `SpanTree.tsx`, `evals/report.py` | Done |
+| Switchable for A/B | `PROMPT_CACHING=0` isolates the effect of caching on cost | `config.py` | Done |
+| Model routing per agent | Cheap model by default, stronger model only for the agent where quality pays (e.g. review); each call priced and traced with its own model | `config.py` `model_overrides`, `llm.py` `model_for` | Done |
+| Config identity includes routing | The model setup is hashed into the run's config hash (unchanged when there are no overrides), so scorecards of different setups are never silently compared | `config.py` `model_signature` | Done |
+| Evidence before adopting | A model swap is judged with the eval harness (accuracy and cost per pass), not by intuition | `evals/` | Process |
+
 ### Reliability and failure handling
 
 | Concept | What it means | Component | Status |

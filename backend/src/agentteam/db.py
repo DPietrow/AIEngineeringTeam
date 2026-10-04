@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS spans (
     model         TEXT,
     input_tokens  INTEGER,
     output_tokens INTEGER,
+    cache_read_tokens  INTEGER,
+    cache_write_tokens INTEGER,
     cost_usd      REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_spans_run ON spans(run_id);
@@ -113,6 +115,8 @@ def connect(path: str | Path) -> sqlite3.Connection:
 _ADDED_COLUMNS = [
     ("runs", "claimed_by", "TEXT"),
     ("runs", "lease_expires_at", "TEXT"),
+    ("spans", "cache_read_tokens", "INTEGER"),
+    ("spans", "cache_write_tokens", "INTEGER"),
 ]
 
 

@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from .llm import DEFAULT_MODEL
 from .sandbox import DEFAULT_IMAGE, SandboxConfig
 
+AGENTS = ("architect", "implementation", "testing", "review", "delivery")
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -16,6 +18,14 @@ class Settings:
     anthropic_api_key: str | None = None
     toy_repo_path: str | None = None
     workspaces_dir: str = "data/workspaces"
+
+    # Per-agent model overrides, e.g. (("review", "claude-sonnet-5-5"),). An agent with no entry
+    # uses llm_model. Set via MODEL_ARCHITECT / MODEL_IMPLEMENTATION / MODEL_TESTING /
+    # MODEL_REVIEW / MODEL_DELIVERY.
+    model_overrides: tuple[tuple[str, str], ...] = ()
+    # Prompt caching: cache the growing conversation prefix between agent turns (cuts input
+    # cost on long loops). PROMPT_CACHING=0 turns it off, e.g. to A/B its effect.
+    prompt_caching: bool = True
 
     # Per-agent step caps (tool-use turns).
     max_architect_steps: int = 10
@@ -66,6 +76,17 @@ class Settings:
     )
 
     @property
+    def model_signature(self) -> str:
+        """Model setup as one string, hashed into the config hash so runs with different
+        per-agent models are never confused. With no overrides it is just the model name, so
+        existing config hashes do not change."""
+        extra = "|".join(f"{a}={m}" for a, m in sorted(self.model_overrides))
+        return f"{self.llm_model}|{extra}" if extra else self.llm_model
+
+    def model_for(self, agent: str) -> str:
+        return dict(self.model_overrides).get(agent, self.llm_model)
+
+    @property
     def delivery_enabled(self) -> bool:
         return bool(self.github_token and self.github_repo and "/" in self.github_repo)
 
@@ -88,6 +109,12 @@ class Settings:
             global_spend_cap_usd=float(env("GLOBAL_SPEND_CAP_USD", cls.global_spend_cap_usd)),
             llm_mode=env("LLM_MODE", cls.llm_mode).lower(),
             llm_model=env("LLM_MODEL", cls.llm_model),
+            model_overrides=tuple(
+                (agent, env(f"MODEL_{agent.upper()}", ""))
+                for agent in AGENTS
+                if env(f"MODEL_{agent.upper()}", "")
+            ),
+            prompt_caching=env("PROMPT_CACHING", "1").lower() not in ("0", "false", "no", "off"),
             anthropic_api_key=env("ANTHROPIC_API_KEY") or None,
             toy_repo_path=env("TOY_REPO_PATH") or None,
             workspaces_dir=env("WORKSPACES_DIR", cls.workspaces_dir),
