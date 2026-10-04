@@ -228,6 +228,38 @@ def test_down_refuses_when_the_server_cannot_be_asked():
     assert len(api.droplets) == 1
 
 
+def test_down_retries_the_idle_check_while_dns_or_tls_settle():
+    api = FakeDO()
+    api.add_droplet()
+    answers = iter([None, None, IDLE])
+    ops = make_ops(api)
+    ops.probe = lambda ip: next(answers)
+    ops.down()
+    assert api.droplets == {}
+
+
+def test_down_explains_why_the_server_could_not_be_reached():
+    api = FakeDO()
+    api.add_droplet()
+    ops = make_ops(api)
+
+    def probe(ip):
+        probe.last_error = "https://agentteam.example.com: [Errno 11001] getaddrinfo failed"
+        return None
+
+    ops.probe = probe
+    with pytest.raises(do_cli.Refused, match="getaddrinfo failed"):
+        ops.down()
+    assert len(api.droplets) == 1
+
+
+def test_probe_reports_a_missing_password_instead_of_failing_silently(tmp_path):
+    cfg = do_cli.Config(token="t", server_env_file=tmp_path / "nope.env")
+    probe = do_cli.make_probe(cfg)
+    assert probe("203.0.113.7") is None
+    assert "API_PASSWORD" in probe.last_error
+
+
 def test_down_works_without_ssh_access():
     """From CI there is no SSH key: stopping services is best effort."""
     api = FakeDO()
