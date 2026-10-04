@@ -481,30 +481,37 @@ class Ops:
             self.log("nothing to shut down: no droplet is running")
             return
         ip = self.ip_of(d) or ""
-        if not force:
-            report = self.probe(ip)
-            if report is None:
-                raise Refused("cannot reach the server to check for running work (use --force)")
-            if report["active_runs"] > 0:
-                raise Refused(f"{report['active_runs']} run(s) in progress; not shutting down")
-        # Quiesce: stop the services so the database is closed cleanly before the snapshot.
-        # Best effort: from CI there may be no SSH access, and the OS shutdown does this anyway.
-        try:
-            self.shell.run(ip, "systemctl stop agentteam-worker agentteam-api; sync", timeout=90)
-        except Exception as e:  # noqa: BLE001
-            self.log(f"note: could not stop services over SSH ({e}); relying on OS shutdown")
-
         droplet_id = d["id"]
-        self.log("shutting the droplet down (graceful)")
-        action = self.api.request("POST", f"/droplets/{droplet_id}/actions", {"type": "shutdown"})
-        try:
-            self.wait_action(droplet_id, action["action"]["id"], "shutdown", 300)
-        except DeployError:
-            self.log("graceful shutdown did not finish; forcing power off")
-            forced = self.api.request(
-                "POST", f"/droplets/{droplet_id}/actions", {"type": "power_off"}
+        if d["status"] == "off":
+            # Left over from an interrupted `down`: nothing can be running, so no checks needed.
+            self.log("the droplet is already powered off; going straight to the snapshot")
+        else:
+            if not force:
+                report = self.probe(ip)
+                if report is None:
+                    raise Refused("cannot reach the server to check for running work (use --force)")
+                if report["active_runs"] > 0:
+                    raise Refused(f"{report['active_runs']} run(s) in progress; not shutting down")
+            # Quiesce: stop the services so the database is closed cleanly before the snapshot.
+            # Best effort: from CI there may be no SSH access, and the OS shutdown does it anyway.
+            try:
+                self.shell.run(
+                    ip, "systemctl stop agentteam-worker agentteam-api; sync", timeout=90
+                )
+            except Exception as e:  # noqa: BLE001
+                self.log(f"note: could not stop services over SSH ({e}); relying on OS shutdown")
+            self.log("shutting the droplet down (graceful)")
+            action = self.api.request(
+                "POST", f"/droplets/{droplet_id}/actions", {"type": "shutdown"}
             )
-            self.wait_action(droplet_id, forced["action"]["id"], "power off", 300)
+            try:
+                self.wait_action(droplet_id, action["action"]["id"], "shutdown", 300)
+            except DeployError:
+                self.log("graceful shutdown did not finish; forcing power off")
+                forced = self.api.request(
+                    "POST", f"/droplets/{droplet_id}/actions", {"type": "power_off"}
+                )
+                self.wait_action(droplet_id, forced["action"]["id"], "power off", 300)
 
         name = f"{self.cfg.snapshot_prefix}{now_stamp()}"
         self.log(f"taking snapshot {name} (this can take several minutes)")

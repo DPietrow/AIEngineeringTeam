@@ -158,6 +158,17 @@ def test_down_snapshots_verifies_then_deletes_in_that_order():
     assert ("POST", "actions") in kinds
 
 
+def test_down_resumes_after_an_interrupted_attempt_left_the_droplet_off():
+    """A failed snapshot leaves a powered-off droplet; the retry must not need the server."""
+    api = FakeDO()
+    did = api.add_droplet()
+    api.droplets[did]["status"] = "off"
+    shell = FakeShell()
+    make_ops(api, shell=shell, idle=None).down()  # no idle report possible: server is off
+    assert api.droplets == {} and len(api.snapshots) == 1
+    assert not shell.commands
+
+
 def test_down_never_deletes_when_the_snapshot_does_not_appear():
     api = FakeDO()
     api.add_droplet()
