@@ -1,6 +1,7 @@
 import asyncio
+from dataclasses import dataclass
 
-from ..agent_loop import AgentError, run_agent_loop
+from ..agent_loop import run_agent_loop
 from ..llm import LLM
 from ..mcp_toolbox import ServerSpec, Toolbox, forbid_git_paths, only
 from ..prompts import load_prompt
@@ -20,6 +21,14 @@ FILESYSTEM_TOOLS = (
     "search_files",
     "get_file_info",
 )
+
+
+@dataclass
+class NoChanges:
+    """Implementation finished without changing anything. `explanation` is the agent's own
+    final message, i.e. a claim, shown to the human but never trusted as a fact."""
+
+    explanation: str
 
 
 def _feedback_text(feedback: TestReport | Verdict) -> str:
@@ -52,11 +61,13 @@ class Implementation:
         workspace: Workspace,
         attempt: int = 1,
         feedback: TestReport | Verdict | None = None,
-    ) -> Patch:
+    ) -> Patch | NoChanges:
         summary = asyncio.run(self._implement(spec, workspace, feedback))
         diff, files = collect_patch(workspace, f"agent (attempt {attempt}): {spec.summary[:60]}")
         if not files:
-            raise AgentError("implementation produced no changes")
+            # The patch is cumulative, so an empty one means nothing was ever changed: the
+            # request was already satisfied (or the agent gave up). Not a crash.
+            return NoChanges(explanation=summary)
         return Patch(
             run_id=run_id,
             branch=workspace.branch,

@@ -13,8 +13,11 @@ from .tracing import Tracer
 
 bp = Blueprint("api", __name__, url_prefix="/api")
 
-# done: approved. failed: a retry cap was hit. error: crashed. stopped: spend cap.
-TERMINAL_STATUSES = {"done", "failed", "error", "stopped"}
+# done: finished (PR opened when delivery is on). failed: a retry cap was hit. error: crashed.
+# stopped: spend cap. rejected: a human declined at the approval gate. no_changes: the agents
+# found nothing to change (request already satisfied). Non-terminal gate statuses:
+# awaiting_approval -> approved -> delivering.
+TERMINAL_STATUSES = {"done", "failed", "error", "stopped", "rejected", "no_changes"}
 MAX_TASK_CHARS = 5000
 
 
@@ -123,6 +126,28 @@ def stream_events(
             time.sleep(poll_interval)
     finally:
         conn.close()
+
+
+def _decide(run_id: str, decision: str):
+    body = request.get_json(silent=True) or {}
+    reason = body.get("reason", "")
+    if not isinstance(reason, str) or len(reason) > 1000:
+        return jsonify(error="'reason' must be a string of at most 1000 characters"), 400
+    if decision == "approve" and not current_app.config.get("DELIVERY_ENABLED"):
+        return jsonify(error="delivery is not configured (GITHUB_TOKEN / GITHUB_REPO)"), 409
+    if not _tracer().decide_gate(run_id, decision, reason):
+        return jsonify(error="run is not awaiting approval"), 409
+    return jsonify(id=run_id, status="approved" if decision == "approve" else "rejected"), 202
+
+
+@bp.post("/runs/<run_id>/approve")
+def approve_run(run_id: str):
+    return _decide(run_id, "approve")
+
+
+@bp.post("/runs/<run_id>/reject")
+def reject_run(run_id: str):
+    return _decide(run_id, "reject")
 
 
 @bp.get("/runs/<run_id>/events")

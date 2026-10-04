@@ -1,4 +1,5 @@
 import os
+import shlex
 from dataclasses import dataclass
 
 from .llm import DEFAULT_MODEL
@@ -34,6 +35,30 @@ class Settings:
     sandbox_pids_limit: int = 128
     sandbox_timeout_s: int = 120
 
+    # Delivery (GitHub PR behind a human gate). Disabled unless BOTH token and repo are set;
+    # when disabled, an approved review ends the run as 'done' exactly as before.
+    github_token: str | None = None
+    github_repo: str | None = None  # "owner/name"
+    github_base_branch: str = "main"
+    github_remote: str = "origin"
+    max_delivery_steps: int = 5
+    # How to launch the GitHub MCP server. The default is the official Docker image.
+    github_mcp_command: str = "docker"
+    github_mcp_args: tuple[str, ...] = (
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "-e",
+        "GITHUB_TOOLS",
+        "ghcr.io/github/github-mcp-server",
+    )
+
+    @property
+    def delivery_enabled(self) -> bool:
+        return bool(self.github_token and self.github_repo and "/" in self.github_repo)
+
     def sandbox(self) -> SandboxConfig:
         return SandboxConfig(
             image=self.sandbox_image,
@@ -64,6 +89,15 @@ class Settings:
             max_review_steps=int(env("MAX_REVIEW_STEPS", cls.max_review_steps)),
             max_test_retries=int(env("MAX_TEST_RETRIES", cls.max_test_retries)),
             max_review_rounds=int(env("MAX_REVIEW_ROUNDS", cls.max_review_rounds)),
+            github_token=env("GITHUB_TOKEN") or None,
+            github_repo=env("GITHUB_REPO") or None,
+            github_base_branch=env("GITHUB_BASE_BRANCH", cls.github_base_branch),
+            github_remote=env("GITHUB_REMOTE", cls.github_remote),
+            max_delivery_steps=int(env("MAX_DELIVERY_STEPS", cls.max_delivery_steps)),
+            github_mcp_command=env("GITHUB_MCP_COMMAND", cls.github_mcp_command),
+            github_mcp_args=(
+                tuple(shlex.split(env("GITHUB_MCP_ARGS", ""), posix=True)) or cls.github_mcp_args
+            ),
             sandbox_mode=env("SANDBOX_MODE", cls.sandbox_mode).lower(),
             sandbox_image=env("SANDBOX_IMAGE", cls.sandbox_image),
             sandbox_memory=env("SANDBOX_MEMORY", cls.sandbox_memory),

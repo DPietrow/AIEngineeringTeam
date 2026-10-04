@@ -265,4 +265,15 @@ class FakeLLM(LLM):
                 "submit_verdict",
                 {"decision": "approved", "summary": "Looks good (fake LLM).", "comments": []},
             )
+        if agent == "delivery":
+            if assistant_turns == 0 and "github__create_pull_request" in tool_names:
+                fields = dict(
+                    re.findall(r"^(owner|repo|head|base): (.+)$", str(messages[0]["content"]), re.M)
+                )
+                return _tool_turn(
+                    "fake-pr",
+                    "github__create_pull_request",
+                    {**fields, "title": "[fake] change", "body": "Opened by the fake LLM."},
+                )
+            return _text_turn("Pull request opened (fake LLM).")
         raise NotImplementedError(f"FakeLLM has no script for {name!r}")

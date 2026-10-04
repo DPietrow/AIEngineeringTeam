@@ -19,14 +19,14 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, is_dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
 
 from .budget import SpendCapExceeded, SpendGuard
-from .db import init_db, write_tx
+from .db import connect, init_db, write_tx
 from .pricing import compute_cost
 from .redact import redact
 
@@ -177,6 +177,98 @@ class Tracer:
             )
             self._insert_event(conn, row["id"], None, "run.status", {"status": "running"})
             return row["id"], row["task"]
+
+    def decide_gate(self, run_id: str, decision: str, reason: str = "") -> bool:
+        """Record the human decision on a run waiting at the approval gate.
+
+        Only a run in 'awaiting_approval' can be decided, and only once: the conditional update
+        makes double-clicks and races harmless. Returns False if the run was not waiting.
+        approve -> 'approved' (the worker then delivers it); reject -> 'rejected' (terminal).
+        """
+        if decision not in ("approve", "reject"):
+            raise ValueError(f"unknown decision {decision!r}")
+        new_status = "approved" if decision == "approve" else "rejected"
+        with write_tx(self.db_path) as conn:
+            cur = conn.execute(
+                "UPDATE runs SET status = ?, updated_at = ? "
+                "WHERE id = ? AND status = 'awaiting_approval'",
+                (new_status, _now(), run_id),
+            )
+            if cur.rowcount != 1:
+                return False
+            self._insert_event(
+                conn, run_id, None, "gate.decision", {"decision": decision, "reason": reason}
+            )
+            self._insert_event(conn, run_id, None, "run.status", {"status": new_status})
+            return True
+
+    def claim_next_delivery(self) -> str | None:
+        """Atomically move the oldest human-approved run to 'delivering'. Returns its id."""
+        with write_tx(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT id FROM runs WHERE status = 'approved' ORDER BY updated_at LIMIT 1"
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute(
+                "UPDATE runs SET status = 'delivering', updated_at = ? WHERE id = ?",
+                (_now(), row["id"]),
+            )
+            self._insert_event(conn, row["id"], None, "run.status", {"status": "delivering"})
+            return str(row["id"])
+
+    def rejected_runs_to_clean(self) -> list[str]:
+        """Rejected runs whose workspace has not been cleaned up yet."""
+        conn = connect(self.db_path)
+        try:
+            rows = conn.execute(
+                "SELECT id FROM runs WHERE status = 'rejected' AND NOT EXISTS ("
+                "SELECT 1 FROM events e WHERE e.run_id = runs.id "
+                "AND e.type IN ('workspace.cleaned', 'workspace.cleanup_failed'))"
+            ).fetchall()
+        finally:
+            conn.close()
+        return [str(r["id"]) for r in rows]
+
+    def runs_with_status(self, statuses: list[str], older_than_hours: float) -> list[str]:
+        """Ids of runs in one of `statuses` that were last updated more than N hours ago."""
+        cutoff = (datetime.now(UTC) - timedelta(hours=older_than_hours)).isoformat()
+        marks = ",".join("?" for _ in statuses)
+        conn = connect(self.db_path)
+        try:
+            rows = conn.execute(
+                f"SELECT id FROM runs WHERE status IN ({marks}) AND updated_at < ? "
+                "ORDER BY created_at",
+                (*statuses, cutoff),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [str(r["id"]) for r in rows]
+
+    def run_task(self, run_id: str) -> str | None:
+        conn = connect(self.db_path)
+        try:
+            row = conn.execute("SELECT task FROM runs WHERE id = ?", (run_id,)).fetchone()
+        finally:
+            conn.close()
+        return None if row is None else str(row["task"])
+
+    def load_artifacts(self, run_id: str) -> dict[str, dict[str, Any]]:
+        """Latest artifact of each kind for a run, as plain dicts (artifact name -> data)."""
+        conn = connect(self.db_path)
+        try:
+            rows = conn.execute(
+                "SELECT data FROM events WHERE run_id = ? AND type = 'artifact.created' "
+                "ORDER BY id",
+                (run_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+        latest: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            payload = json.loads(row["data"])
+            latest[payload["artifact"]] = payload["data"]
+        return latest
 
     def set_run_status(self, run_id: str, status: str, **extra: Any) -> None:
         with write_tx(self.db_path) as conn:

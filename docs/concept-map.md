@@ -37,6 +37,26 @@ Last updated: 2026-10-03 (after the eval harness).
 | Command allowlist, no shell | Models can only run `pytest` / `ruff check`; no pipes, chaining or redirects | `terminal_server.py` | Done |
 | Tool design from failure | Agent tried to read source with a docs-only tool; adding `read_file` fixed it | `docs_server.py` `read_file` | Done |
 
+### Delivery: acting on the outside world safely
+
+| Concept | What it means | Component | Status |
+|---|---|---|---|
+| Harness acts, model describes | The harness pushes the branch (never force, `agent/*` only); the model only writes the PR title and body. The model never holds git credentials | `workspace.py` `push_branch`, `agents/delivery.py` | Done |
+| Tool scoping, three layers | Official GitHub MCP server launched with `GITHUB_TOOLS=create_pull_request` (server exposes one tool), `only(...)` policy hides everything else, guard re-checks every call | `agents/delivery.py` | Done |
+| Argument guard | owner, repo, head and base must equal the run's real values; a confused or injected model cannot open a PR elsewhere | `agents/delivery.py` `make_pr_guard` | Done |
+| Facts from tool results | PR url and number come from the real MCP result, not model prose; no confirmed PR means the run errors | `agents/delivery.py` `_PRRecorder` | Done |
+| Least-privilege credential | Fine-grained PAT limited to one repo (Contents + Pull requests); passed by env var, never argv; scrubbed by `register_secret` and redaction | `.env.example`, `workspace.py`, `worker.py` | Done |
+| Offline testing of external integrations | Fake MCP server stands in for GitHub; a local bare repo stands in for the remote | `tests/fake_github_server.py`, `tests/test_delivery.py` | Done |
+
+### Resource hygiene
+
+| Concept | What it means | Component | Status |
+|---|---|---|---|
+| Lifecycle-aware cleanup | Worktree and local branch are removed when the work is safely elsewhere (PR opened) or discarded (rejected); failed runs are kept for debugging until an explicit sweep | `workspace.py` `cleanup_workspace`, `orchestrator.py`, `cleanup.py` | Done |
+| Cleanup never changes outcomes | Best effort; problems become `workspace.cleanup_failed` events, not run errors | `orchestrator.py` `_cleanup` | Done |
+| Destructive commands default to safe | Dry run, refuses active runs, excludes `done` runs (may hold the only copy of the work) | `cleanup.py` | Done |
+| Eval environment isolation | Evals run against a frozen clone of the scaffold, because the live repo changes as agent PRs merge. Caught by the grader-validation test failing after a real merge | README (Evals), `tests/test_evals.py` | Done |
+
 ### Sandboxing and isolation
 
 | Concept | What it means | Component | Status |
@@ -65,9 +85,12 @@ Last updated: 2026-10-03 (after the eval harness).
 | State machine | Explicit states and transitions own the run, not the model | `orchestrator.py` | Done |
 | Capped failure loops | Test-fix and review-fix loops retry at most 3 times, then the run fails | `orchestrator.py` `max_test_retries`, `max_review_rounds` | Done |
 | Feedback into the loop | Failing report or reviewer comments are handed back so the agent fixes, not restarts | `agents/implementation.py` `feedback` | Done |
-| Run lifecycle statuses | `pending / running / done / failed / error / stopped` distinguish "agent failed" from "system broke" | `orchestrator.py`, `api.py` | Done |
+| Run lifecycle statuses | `pending / running / awaiting_approval / approved / delivering / done / failed / error / stopped / rejected` distinguish "agent failed" from "system broke" from "human said no" | `orchestrator.py`, `api.py` | Done |
 | Separate worker process | Web API enqueues; a worker claims and runs, so requests never block on agents | `worker.py`, `tracing.py` `claim_next_run` | Done |
-| Human review gate | A person approves before anything leaves the machine (PR) | Delivery agent | Planned |
+| Human-in-the-loop gate | A reviewer-approved run parks at `awaiting_approval`; nothing is pushed or opened until a person approves in the dashboard. Reject is terminal. The worker is free while it waits (durable pause, not a blocked thread) | `orchestrator.py`, `tracing.py` `decide_gate`, `api.py` approve/reject, `frontend/src/ApprovalCard.tsx` | Built (needs live GitHub smoke test) |
+| Single-use, race-safe decisions | The decision is a conditional `UPDATE ... WHERE status='awaiting_approval'`, so double clicks and concurrent approve/reject cannot both win | `tracing.py` `decide_gate` | Done |
+| Distinguish "nothing to do" from "broke" | An empty patch is a legitimate outcome (request already satisfied), reported as its own terminal status `no_changes` with the agent's explanation, flagged as an unverified claim. Found by a real run, where it was wrongly reported as `error` | `agents/implementation.py` `NoChanges`, `orchestrator.py` | Done |
+| Optional capability by config | With no GitHub settings the pipeline ends `done` exactly as before; evals force delivery off so they never park or open PRs | `config.py` `delivery_enabled`, `evals/runner.py` | Done |
 | Prompt injection hygiene | Task text, docs, file contents and command output are declared untrusted in every prompt | `prompts/*.md` | Done |
 
 ## 2. LLMOps

@@ -22,7 +22,14 @@ LOCAL = SandboxConfig(mode="local", timeout_s=60)
 
 
 def _toy_repo() -> Path | None:
-    candidates = [os.environ.get("TOY_REPO_PATH"), Path(__file__).parents[3] / "agentteam-toy"]
+    # The suite needs the PRISTINE toy app (as scaffolded). The live toy repo moves on every
+    # time an agent's PR is merged, so prefer a frozen sibling clone (see README, Evals).
+    candidates = [
+        os.environ.get("EVAL_TOY_REPO_PATH"),
+        Path(__file__).parents[3] / "agentteam-toy-eval",
+        os.environ.get("TOY_REPO_PATH"),
+        Path(__file__).parents[3] / "agentteam-toy",
+    ]
     for c in candidates:
         if c and (Path(c) / "toyapp" / "app.py").exists():
             return Path(c)
@@ -65,7 +72,11 @@ def test_hidden_tests_fail_on_base_and_pass_on_reference_solution(tmp_path, case
     args = ["pytest", "-q", "-p", "no:cacheprovider", f"tests/{G.HIDDEN_TEST_NAME}"]
 
     base = run_in_sandbox(repo, args, LOCAL)
-    assert base.exit_code != 0, "hidden tests pass on the base repo: they test nothing"
+    assert base.exit_code != 0, (
+        "hidden tests pass on the base repo. Either they test nothing, or the toy repo is no "
+        "longer pristine (an agent PR was merged): point EVAL_TOY_REPO_PATH at a frozen clone "
+        "of the scaffold commit (see README, Evals)"
+    )
 
     apply_operations(repo, case.reference)
     solved = run_in_sandbox(repo, args, LOCAL)

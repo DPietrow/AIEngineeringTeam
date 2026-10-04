@@ -41,9 +41,17 @@ def build_tracer(settings: Settings) -> Tracer:
 
 
 def work_once(tracer: Tracer, orchestrator: Orchestrator) -> bool:
+    # Human-approved runs first: someone is waiting on them and they are cheap.
+    approved = tracer.claim_next_delivery()
+    if approved is not None:
+        log.info("run %s approved; delivering", approved)
+        orchestrator.deliver(approved)
+        log.info("run %s delivery finished", approved)
+        return True
     claimed = tracer.claim_next_run()
     if claimed is None:
-        return False
+        # Idle: tidy up after runs a human rejected (the API process cannot touch the repo).
+        return orchestrator.cleanup_rejected()
     run_id, task = claimed
     log.info("run %s started", run_id)
     orchestrator.execute(run_id, task)
@@ -57,10 +65,14 @@ def main() -> None:
     load_dotenv()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     settings = Settings.from_env()
+    register_secret(settings.github_token)
     tracer = build_tracer(settings)
     orchestrator = Orchestrator(tracer, build_llm(tracer, settings), settings)
     log.info(
-        "worker ready (db=%s, config=%s)", settings.database_path, config_hash(settings.llm_model)
+        "worker ready (db=%s, config=%s, delivery=%s)",
+        settings.database_path,
+        config_hash(settings.llm_model),
+        f"on -> {settings.github_repo}" if settings.delivery_enabled else "off",
     )
     while True:
         if not work_once(tracer, orchestrator):

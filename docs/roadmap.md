@@ -1,12 +1,17 @@
 # Roadmap
 
-Last updated: 2026-10-03.
+Last updated: 2026-10-03 (dashboard and Delivery built).
 
 ## Remaining build order
 
-1. Eval harness: **built** (see `docs/concept-map.md`). Next: record a baseline real-model run.
-2. React live trace dashboard (span tree, live via SSE, eval scorecards).
-3. Delivery agent with GitHub MCP and a human approval gate for the PR.
+1. Eval harness: **built**, baseline recorded, review prompt v2 validated (see `docs/concept-map.md`).
+2. React live trace dashboard: **built** (run list, live run page, artifacts, approval gate).
+   Not built, optional: span detail panel, eval scorecards page, hiding coding-eval runs.
+3. Delivery agent with GitHub MCP and a human approval gate: **built**, tested offline with a
+   fake MCP server, and smoke-tested live (PR #1 opened, merged; reject path verified). Still to
+   do: retry for a delivery that errors after the push (today the run ends `error` and the
+   branch stays pushed). Done: worktree/branch cleanup (automatic + `agentteam.cleanup`), and an
+   honest `no_changes` status.
 4. Resilience: API retries with backoff, run recovery after worker crash, per-run wall-clock
    timeout, worktree cleanup, prompt caching, per-agent models, trace payload trimming.
 5. Production readiness: API authentication, hardened redaction, runbook.

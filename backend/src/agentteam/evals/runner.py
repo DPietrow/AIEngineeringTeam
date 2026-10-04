@@ -5,6 +5,7 @@ Review). Each trial is an ordinary traced run, so any failure can be opened in t
 Review cases bypass the rest of the team and hand a seeded patch straight to the Review agent.
 """
 
+import dataclasses
 import json
 import shutil
 import statistics
@@ -83,6 +84,8 @@ def run_coding_case(
     settings: Settings,
     keep_workspaces: bool = False,
 ) -> CaseResult:
+    # Evals must never open real PRs or park at the human gate: switch delivery off.
+    settings = dataclasses.replace(settings, github_token=None)
     run_id = tracer.create_run(case.task, config_hash=config_hash(settings.llm_model))
     # Mark running directly: claim_next_run() could steal an unrelated pending run.
     tracer.set_run_status(run_id, "running")

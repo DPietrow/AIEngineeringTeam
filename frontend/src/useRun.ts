@@ -18,6 +18,7 @@ const EVENT_TYPES = [
   'artifact.created',
   'state.transition',
   'loop.retry',
+  'gate.decision',
 ]
 
 /**

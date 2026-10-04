@@ -91,4 +91,13 @@ export interface StreamEvent {
   data: Record<string, unknown>
 }
 
-export const TERMINAL = new Set(['done', 'failed', 'error', 'stopped'])
+export interface PullRequest {
+  title: string
+  body: string
+  head_branch: string
+  base_branch: string
+  url: string | null
+  number: number | null
+}
+
+export const TERMINAL = new Set(['done', 'failed', 'error', 'stopped', 'rejected', 'no_changes'])

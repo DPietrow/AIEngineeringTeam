@@ -1,8 +1,10 @@
+import ApprovalCard from './ApprovalCard'
 import Artifacts from './Artifacts'
 import SpanTree from './SpanTree'
 import StateProgress from './StateProgress'
 import { useRun } from './useRun'
 import { usd } from './format'
+import { TERMINAL } from './types'
 import { Card, StatusBadge } from './ui'
 
 export default function RunPage({ runId }: { runId: string }) {
@@ -12,6 +14,13 @@ export default function RunPage({ runId }: { runId: string }) {
   if (!detail) return <p className="text-sm text-slate-500">Loading...</p>
 
   const { run, spans, artifacts } = detail
+  // Why the run ended: a crash message on a root span (run / deliver), or the reason carried
+  // by the final run.status event (failed, stopped, no_changes).
+  const lastStatus = [...events].reverse().find((e) => e.type === 'run.status')
+  const runError =
+    spans.find((s) => s.parent_id === null && s.error)?.error ??
+    (typeof lastStatus?.data.reason === 'string' ? lastStatus.data.reason : null)
+  const neutral = run.status === 'no_changes'
   return (
     <div className="space-y-4">
       <div>
@@ -30,6 +39,17 @@ export default function RunPage({ runId }: { runId: string }) {
       <Card title="Progress">
         <StateProgress events={events} status={run.status} />
       </Card>
+      {runError && TERMINAL.has(run.status) && (
+        <div
+          className={`rounded-lg border px-4 py-3 text-sm ${
+            neutral ? 'border-slate-300 bg-slate-50 text-slate-700' : 'border-red-300 bg-red-50 text-red-800'
+          }`}
+        >
+          <strong>{neutral ? 'Nothing to change' : run.status}:</strong> {runError}
+          {neutral && <span className="block text-xs text-slate-500">This is the agent&apos;s own explanation, not a verified fact.</span>}
+        </div>
+      )}
+      {run.status === 'awaiting_approval' && <ApprovalCard runId={run.id} />}
       <Artifacts artifacts={artifacts} />
       <Card title={`Trace (${spans.length} spans)`}>
         <SpanTree spans={spans} />

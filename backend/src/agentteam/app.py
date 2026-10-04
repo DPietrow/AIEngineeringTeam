@@ -11,6 +11,7 @@ def create_app(config: dict | None = None) -> Flask:
     settings = Settings.from_env()
     app.config["DATABASE_PATH"] = settings.database_path
     app.config["LLM_MODEL"] = settings.llm_model
+    app.config["DELIVERY_ENABLED"] = settings.delivery_enabled
     if config:
         app.config.update(config)
 

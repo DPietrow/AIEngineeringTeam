@@ -2,6 +2,7 @@ import type {
   ArtifactEnvelope,
   DesignSpec,
   Patch,
+  PullRequest,
   ReviewComment,
   TestReport,
   Verdict,
@@ -131,8 +132,30 @@ function VerdictCard({ verdict }: { verdict: Verdict }) {
   )
 }
 
+function PullRequestCard({ pr }: { pr: PullRequest }) {
+  return (
+    <Card title="Pull request" right={<StatusBadge status="done" />}>
+      <p className="text-sm font-medium">
+        {pr.url ? (
+          <a href={pr.url} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline">
+            #{pr.number} {pr.title}
+          </a>
+        ) : (
+          pr.title
+        )}
+      </p>
+      <p className="mb-2 font-mono text-xs text-slate-500">
+        {pr.head_branch} &rarr; {pr.base_branch}
+      </p>
+      <pre className="max-h-64 overflow-auto rounded bg-slate-50 p-2 text-xs whitespace-pre-wrap">{pr.body}</pre>
+    </Card>
+  )
+}
+
 function renderOne(a: ArtifactEnvelope) {
   switch (a.artifact) {
+    case 'pull_request':
+      return <PullRequestCard pr={a.data as PullRequest} />
     case 'design_spec':
       return <SpecCard spec={a.data as DesignSpec} />
     case 'patch':
@@ -158,21 +181,32 @@ export default function Artifacts({ artifacts }: { artifacts: ArtifactEnvelope[]
   if (artifacts.length === 0) return null
   const lastIndex = new Map<string, number>()
   artifacts.forEach((a, i) => lastIndex.set(a.artifact, i))
+  const isEarlier = (a: ArtifactEnvelope, i: number) => lastIndex.get(a.artifact) !== i
+  const earlier = artifacts.filter(isEarlier)
+  const current = artifacts.filter((a, i) => !isEarlier(a, i))
+  // Spec first, then one disclosure holding all earlier attempts, then the latest of the rest.
+  const spec = current.filter((a) => a.artifact === 'design_spec')
+  const rest = current.filter((a) => a.artifact !== 'design_spec')
   return (
     <div className="space-y-4">
-      {artifacts.map((a, i) => {
-        if (lastIndex.get(a.artifact) === i) return <div key={i}>{renderOne(a)}</div>
-        const attempt = a.artifact === 'patch' ? ` (attempt ${(a.data as Patch).attempt})` : ''
-        return (
-          <details key={i} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm shadow-sm">
-            <summary className="cursor-pointer text-slate-600">
-              Earlier {a.artifact.replace('_', ' ')}
-              {attempt}
-            </summary>
-            <div className="mt-3">{renderOne(a)}</div>
-          </details>
-        )
-      })}
+      {spec.map((a, i) => (
+        <div key={`s${i}`}>{renderOne(a)}</div>
+      ))}
+      {earlier.length > 0 && (
+        <details className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm shadow-sm">
+          <summary className="cursor-pointer text-slate-600">
+            Earlier attempts ({earlier.length} artifacts)
+          </summary>
+          <div className="mt-3 space-y-4">
+            {earlier.map((a, i) => (
+              <div key={i}>{renderOne(a)}</div>
+            ))}
+          </div>
+        </details>
+      )}
+      {rest.map((a, i) => (
+        <div key={`r${i}`}>{renderOne(a)}</div>
+      ))}
     </div>
   )
 }
