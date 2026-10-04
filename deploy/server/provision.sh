@@ -8,6 +8,16 @@ export DEBIAN_FRONTEND=noninteractive
 
 if [ "$(id -u)" -ne 0 ]; then echo "run as root" >&2; exit 1; fi
 
+# A brand-new droplet is still running cloud-init and unattended upgrades, which hold the apt
+# locks for the first minutes. Wait for them instead of failing, for every apt call below
+# (including the ones inside third-party setup scripts).
+cloud-init status --wait >/dev/null 2>&1 || true
+echo 'DPkg::Lock::Timeout "900";' > /etc/apt/apt.conf.d/99-lock-timeout
+while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock >/dev/null 2>&1; do
+  echo "provision: waiting for another apt process to finish"
+  sleep 5
+done
+
 apt-get update -y
 apt-get install -y ca-certificates curl git gnupg jq ufw fail2ban unattended-upgrades \
   docker.io apt-transport-https debian-keyring debian-archive-keyring

@@ -348,7 +348,13 @@ class Ops:
         if existing:
             ip = self.ip_of(existing)
             self.log(f"already running: {existing['name']} at {ip}")
-            return self.address(ip) if ip else ""
+            if not ip:
+                return ""
+            # Idempotent: finish the steps a previous, interrupted `up` may have missed.
+            host = self.apply_host(ip)
+            self.wait_healthy(ip)
+            self.log(f"up: https://{host}")
+            return host
         snaps = self.snapshots()
         restoring = snaps[-1] if snaps else None
         payload: dict[str, Any] = {

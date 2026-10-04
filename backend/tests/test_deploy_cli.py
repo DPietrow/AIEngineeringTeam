@@ -350,11 +350,14 @@ def test_up_refuses_a_fresh_server_nobody_could_log_in_to():
     assert not api.droplets
 
 
-def test_up_is_a_noop_when_already_running():
+def test_up_when_already_running_creates_nothing_but_finishes_dns_and_host():
     api = FakeDO()
-    api.add_droplet()
-    make_ops(api).up()
+    api.add_droplet(ip="203.0.113.7")
+    shell = FakeShell()
+    host = make_ops(api, shell=shell).up()
     assert not [c for c in api.calls if c == ("POST", "/droplets")]
+    assert host == "203-0-113-7.sslip.io"
+    assert any("set-host.sh 203-0-113-7.sslip.io" in c for c in shell.commands)
 
 
 def test_up_rejects_a_snapshot_from_another_region():
