@@ -524,9 +524,13 @@ class Ops:
             self.log("the droplet is already powered off; going straight to the snapshot")
         else:
             if not force:
-                report = self.probe(ip)
+                report = self.probe_with_retries(ip)
                 if report is None:
-                    raise Refused("cannot reach the server to check for running work (use --force)")
+                    why = getattr(self.probe, "last_error", "")
+                    raise Refused(
+                        "cannot reach the server to check for running work (use --force)"
+                        + (f". Reason: {why}" if why else "")
+                    )
                 if report["active_runs"] > 0:
                     raise Refused(f"{report['active_runs']} run(s) in progress; not shutting down")
             # Quiesce: stop the services so the database is closed cleanly before the snapshot.
@@ -598,6 +602,17 @@ class Ops:
                 "idle": self.probe(ip) if ip else None,
             }
         return out
+
+    def probe_with_retries(self, ip: str, attempts: int = 4, wait_s: float = 15.0) -> dict | None:
+        """Right after `up`, DNS or the certificate may still be settling: try a few times."""
+        for attempt in range(attempts):
+            report = self.probe(ip)
+            if report is not None:
+                return report
+            if attempt < attempts - 1:
+                self.log(f"server not answering yet; retrying in {wait_s:.0f}s")
+                self.sleep(wait_s)
+        return None
 
     def idle_check(self, shutdown_after_min: float | None) -> bool:
         """True if idle. With shutdown_after_min, also shuts down when idle long enough."""
@@ -674,22 +689,31 @@ class Ops:
 
 
 def make_probe(cfg: Config) -> Callable[[str], dict | None]:
-    """Asks the server whether it is busy (login, then GET /api/idle). None = unreachable."""
+    """Asks the server whether it is busy (login, then GET /api/idle). None = unreachable.
+    The reason for the last failure is kept in `probe.last_error` so it can be shown."""
 
     def probe(ip: str) -> dict | None:
+        probe.last_error = ""  # type: ignore[attr-defined]
         if not cfg.api_password:
+            probe.last_error = (  # type: ignore[attr-defined]
+                f"no API_PASSWORD found (looked in the environment and {cfg.server_env_file})"
+            )
             return None
         host = cfg.hostname
         bases = [f"https://{host}"] if host else []
         bases += [f"https://{dashed(ip)}.sslip.io", f"http://{ip}"]
+        errors = []
         for base in bases:
             try:
                 token = http_json("POST", f"{base}/api/login", {"password": cfg.api_password})[
                     "token"
                 ]
                 return http_json("GET", f"{base}/api/idle", token=token)
-            except (urllib.error.URLError, TimeoutError, KeyError, ValueError):
-                continue
+            except urllib.error.HTTPError as e:
+                errors.append(f"{base}: HTTP {e.code}")
+            except (urllib.error.URLError, TimeoutError, KeyError, ValueError) as e:
+                errors.append(f"{base}: {e}")
+        probe.last_error = "; ".join(errors)  # type: ignore[attr-defined]
         return None
 
     return probe
