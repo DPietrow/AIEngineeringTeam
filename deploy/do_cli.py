@@ -198,14 +198,18 @@ class SshShell:
 
     def run(self, ip: str, command: str, *, check: bool = True, timeout: int = 600) -> str:
         cmd = ["ssh", *self._opts(), f"root@{ip}", command]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
+        )
         if check and proc.returncode != 0:
             raise DeployError(f"ssh command failed ({proc.returncode}): {command}\n{proc.stderr}")
         return proc.stdout
 
     def upload(self, ip: str, local: Path, remote: str) -> None:
         cmd = ["scp", *self._opts(), str(local), f"root@{ip}:{remote}"]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600
+        )
         if proc.returncode != 0:
             raise DeployError(f"scp failed: {proc.stderr}")
 
