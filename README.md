@@ -192,6 +192,16 @@ uv run python -m agentteam.evals gate evals/baselines/review-hard.json <candidat
 Evals count towards `GLOBAL_SPEND_CAP_USD` (default $10, summed over everything in the local
 database), so raise it before a large eval session.
 
+## Deployment (DigitalOcean)
+
+`deploy/` has everything to run the whole stack on one droplet and to switch it off when it is
+not in use. `python deploy\do_cli.py up` creates the server (restoring the newest snapshot if
+there is one), `deploy` ships committed code, and `down` snapshots the disk, verifies the
+snapshot and then deletes the droplet, because a powered-off droplet is still billed. An opt-in
+workflow (`idle-shutdown.yml`) does the same automatically when nothing has happened for an hour.
+Runbook, costs and safety rules: `deploy/README.md`. The first deployment uses SQLite on the
+droplet's disk; the Postgres cutover follows (`docs/roadmap.md`).
+
 ## Docs
 
 - `docs/concept-map.md`: every component mapped to harness-engineering and LLMOps concepts
@@ -201,4 +211,4 @@ database), so raise it before a large eval session.
 
 Built: tracing core, SSE streaming, Architect/Implementation/Testing/Review agents, MCP tool
 scoping, Docker sandbox, orchestrator state machine, eval harness, React trace dashboard,
-Delivery agent with a human PR gate. Next: live GitHub smoke test, resilience, auth, deployment.
+Delivery agent with a human PR gate. Also built: resilience, auth, multi-worker safety, CI eval gate, DigitalOcean deployment scripts with spin-down. Next: first live deploy, Postgres cutover.

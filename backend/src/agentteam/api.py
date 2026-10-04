@@ -4,6 +4,8 @@ import json
 import logging
 import time
 from collections.abc import Iterator
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, Response, current_app, jsonify, request
@@ -62,6 +64,62 @@ def _limited(name: str):
 def auth_status():
     """Public: lets the dashboard decide whether to show the login screen."""
     return jsonify(auth_required=bool(current_app.config.get("API_PASSWORD")))
+
+
+ACTIVE_STATUSES = ("pending", "running", "approved", "delivering")
+
+
+def activity_file(db_path: str) -> Path:
+    return Path(db_path).parent / "last_activity"
+
+
+def touch_activity(db_path: str) -> None:
+    """Records 'someone used the API just now' (a file, so all API processes share it)."""
+    try:
+        p = activity_file(db_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.touch()
+    except OSError:
+        pass  # idle tracking must never break a request
+
+
+def idle_report(db_path: str, now: datetime | None = None) -> dict[str, Any]:
+    """What the spin-down tooling needs: is anything running, and how long has it been quiet?"""
+    now = now or datetime.now(UTC)
+    conn = connect(db_path)
+    try:
+        marks = ",".join("?" for _ in ACTIVE_STATUSES)
+        active = conn.execute(
+            f"SELECT COUNT(*) AS n FROM runs WHERE status IN ({marks})", ACTIVE_STATUSES
+        ).fetchone()["n"]
+        waiting = conn.execute(
+            "SELECT COUNT(*) AS n FROM runs WHERE status = 'awaiting_approval'"
+        ).fetchone()["n"]
+        newest = conn.execute("SELECT MAX(updated_at) AS t FROM runs").fetchone()["t"]
+    finally:
+        conn.close()
+    last: datetime | None = None
+    if newest:
+        last = datetime.fromisoformat(newest)
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=UTC)
+    try:
+        touched = datetime.fromtimestamp(activity_file(db_path).stat().st_mtime, UTC)
+        last = touched if last is None or touched > last else last
+    except OSError:
+        pass
+    idle_minutes = None if last is None else max(0.0, (now - last).total_seconds() / 60)
+    return {
+        "active_runs": active,
+        "awaiting_approval": waiting,
+        "idle_minutes": None if idle_minutes is None else round(idle_minutes, 1),
+    }
+
+
+@bp.get("/idle")
+def idle():
+    """Authenticated. Used by deploy/do_cli.py and the idle-shutdown workflow."""
+    return jsonify(idle_report(_db_path()))
 
 
 @bp.post("/login")

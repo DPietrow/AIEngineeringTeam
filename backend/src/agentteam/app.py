@@ -1,10 +1,12 @@
 import logging
+import time
 
 from flask import Flask, Response, g, jsonify, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import __version__
 from .api import bp as api_bp
+from .api import touch_activity
 from .auth import MIN_SECRET_CHARS, InvalidToken, RateLimiter, bearer_token, verify_token
 from .config import Settings
 from .tracing import Tracer
@@ -13,6 +15,8 @@ log = logging.getLogger("agentteam.auth")
 
 # Reachable without a token: liveness checks, the login call itself, and "is auth on?".
 PUBLIC_ENDPOINTS = {"health", "api.login", "api.auth_status"}
+# Requests that do not count as "someone is using the dashboard" (see _note_use).
+IDLE_NEUTRAL_ENDPOINTS = {"api.idle", "health", "api.login", "api.auth_status"}
 CORS_ALLOWED_HEADERS = "Authorization, Content-Type, Last-Event-ID"
 CORS_ALLOWED_METHODS = "GET, POST, OPTIONS"
 
@@ -67,12 +71,27 @@ def create_app(config: dict | None = None) -> Flask:
         origin = request.headers.get("Origin", "").rstrip("/")
         return origin if origin and origin in app.config["CORS_ORIGINS"] else None
 
+    last_touch = [0.0]
+
+    def _note_use() -> None:
+        """An authenticated person is using the dashboard: reset the idle clock (at most every
+        30 s). The idle probe itself must not count, or the server could never look idle."""
+        if request.endpoint in IDLE_NEUTRAL_ENDPOINTS:
+            return
+        now = time.monotonic()
+        if now - last_touch[0] >= 30:
+            last_touch[0] = now
+            touch_activity(app.config["DATABASE_PATH"])
+
     @app.before_request
     def _preflight_and_auth():
         origin = cors_origin()
         if request.method == "OPTIONS" and origin:
             return Response(status=204)  # CORS headers are added in after_request
-        if request.method == "OPTIONS" or not auth_enabled(app):
+        if request.method == "OPTIONS":
+            return None
+        if not auth_enabled(app):
+            _note_use()
             return None
         if request.endpoint is None or request.endpoint in PUBLIC_ENDPOINTS:
             return None
@@ -86,6 +105,7 @@ def create_app(config: dict | None = None) -> Flask:
             resp.status_code = 401
             resp.headers["WWW-Authenticate"] = 'Bearer realm="agentteam"'
             return resp
+        _note_use()
         return None
 
     @app.after_request

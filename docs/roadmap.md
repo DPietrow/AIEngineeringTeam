@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-10-03 (dashboard and Delivery built).
+Last updated: 2026-10-04 (deployment scripts built).
 
 ## Remaining build order
 
@@ -23,7 +23,11 @@ Last updated: 2026-10-03 (dashboard and Delivery built).
    record `evals/baselines/full.json` from a clean full run; hardened redaction, runbook. Done: multi-worker tests and lease fencing (found and fixed a real
    stalled-worker overwrite bug), API authentication (password to JWT, rate limits, CORS allowlist,
    authenticated fetch-based live streaming).
-6. Hosted deployment, including the Postgres cutover below.
+6. Hosted deployment, including the Postgres cutover below. Decided: **DigitalOcean**, one
+   droplet (Caddy + gunicorn + worker + Docker). **Scripts built** (`deploy/`): provisioning,
+   release, systemd units, Caddy, `do_cli.py up/down/deploy/status`, snapshot-then-destroy
+   spin-down (a powered-off droplet is still billed), opt-in idle auto-shutdown workflow. Still to
+   do: first live deploy (not yet run end to end), then the Postgres cutover.
 
 ## Postgres cutover (SQLite to a hosted database)
 
@@ -91,7 +95,8 @@ service start Docker containers (no Docker socket, no Docker-in-Docker). Options
 - Use a remote sandbox provider (for example E2B or Modal) behind the same `run_in_sandbox`
   interface.
 
-Decide this before deploying: the sandbox interface in `sandbox.py` is intentionally small, so
+Decided: a DigitalOcean droplet with Docker (see `deploy/`), so the sandbox needs no new backend.
+Original note: the sandbox interface in `sandbox.py` is intentionally small, so
 either option is a new backend behind it, not a rewrite.
 
 ### Other hosting notes
