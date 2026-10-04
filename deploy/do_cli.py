@@ -258,7 +258,8 @@ REMOTE_DB = "/var/lib/agentteam/agentteam.db"
 def check_database(path: Path) -> None:
     """Raises unless `path` is an intact SQLite database holding this app's tables."""
     try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        # immutable: read without creating -wal/-shm files next to the copy
+        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro&immutable=1", uri=True)
         try:
             result = conn.execute("PRAGMA integrity_check").fetchone()[0]
             tables = {

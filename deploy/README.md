@@ -75,6 +75,29 @@ off, `up` first. To restore a backup onto a server: stop the services, copy the 
 `/var/lib/agentteam/agentteam.db` (owner `agentteam`), delete any `-wal`/`-shm` files next to it,
 start the services. Keep backups somewhere that is not only this machine.
 
+## Moving to another machine (encrypted secrets bundle)
+
+Secrets are never committed (`.gitignore` blocks `.env*`, private keys, `*.vault`). To carry them
+to a new computer, pack them into one passphrase-encrypted file:
+
+```powershell
+uv run deploy\secrets_vault.py pack          # writes deploy\secrets.vault (git-ignored)
+uv run deploy\secrets_vault.py list deploy\secrets.vault   # check it opens (names only)
+```
+
+It contains `backend/.env`, `deploy/.env.deploy`, `deploy/.env.server` and the two SSH keys
+(AES-256-GCM, scrypt key derivation, 16+ character passphrase enforced). Store the file and the
+passphrase **separately** (the file in a private repository or cloud drive, the passphrase in a
+password manager). On the new machine, clone the repo, then:
+
+```powershell
+uv run deploy\secrets_vault.py unpack secrets.vault     # refuses to overwrite; --force to replace
+python deploy\do_cli.py status                           # proves the token and paths work
+```
+
+The vault is only as strong as its passphrase: anyone holding the file can guess offline.
+Repack after any secret changes (rotated token, new password).
+
 ## Auto-deploy from `main`
 
 `.github/workflows/deploy-main.yml` ships every commit that passes CI on `main` to the running
