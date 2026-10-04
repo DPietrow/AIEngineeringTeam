@@ -116,6 +116,13 @@ def cmd_run(args: argparse.Namespace, settings: Settings) -> int:
     (out_dir / f"{label}.json").write_text(report_to_json(report), encoding="utf-8")
     print("\n" + md)
     print(f"Saved eval run {report.id} (label {label}) and {out_dir / (label + '.md')}")
+    if args.fail_on_error:
+        broken = [r for r in report.results if r.error]
+        if broken:
+            print(f"\n{len(broken)} case(s) hit a harness error (not a wrong answer):")
+            for r in broken[:10]:
+                print(f"  {r.case_id} trial {r.trial}: {r.error[:200]}")
+            return 1
     return 0
 
 
@@ -236,6 +243,11 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--sandbox", choices=["docker", "local"])
     r.add_argument("--max-cost", type=float, default=3.0, help="stop starting trials past this USD")
     r.add_argument("--keep-workspaces", action="store_true")
+    r.add_argument(
+        "--fail-on-error",
+        action="store_true",
+        help="exit 1 if any case hit a harness error (setup, git, crash), whatever its score",
+    )
     r.add_argument(
         "--allow-live-repo",
         action="store_true",

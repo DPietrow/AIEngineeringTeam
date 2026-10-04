@@ -83,10 +83,12 @@ jobs:
           ref: 626e075fcb42e0e8ba26bc26b8cbd73adc472794
           path: toy-eval
           token: ${{ secrets.TOY_REPO_TOKEN || github.token }}
-      - name: Detach the toy repo from its remote (evals must never push)
+      - name: Prepare the toy repo (a branch named main, no remote)
         if: steps.key.outputs.has_key == 'true'
         working-directory: ${{ github.workspace }}/toy-eval
-        run: git remote remove origin
+        run: |
+          git checkout -B main
+          git remote remove origin
       - name: Run the hard review cases and gate against the baseline
         if: steps.key.outputs.has_key == 'true'
         env:
@@ -95,8 +97,9 @@ jobs:
         run: |
           set -u
           attempt() {
+            # both steps must succeed: no harness errors, and no regression against the baseline
             uv run python -m agentteam.evals run --only review --tag hard --trials 1 \
-              --max-cost 1 --label "$1"
+              --max-cost 1 --label "$1" --fail-on-error &&
             uv run python -m agentteam.evals gate evals/baselines/review-hard.json \
               "data/evals/$1.json" --tolerance 0
           }
@@ -135,9 +138,11 @@ jobs:
           ref: 626e075fcb42e0e8ba26bc26b8cbd73adc472794
           path: toy-eval
           token: ${{ secrets.TOY_REPO_TOKEN || github.token }}
-      - name: Detach the toy repo from its remote
+      - name: Prepare the toy repo (a branch named main, no remote)
         working-directory: ${{ github.workspace }}/toy-eval
-        run: git remote remove origin
+        run: |
+          git checkout -B main
+          git remote remove origin
       - name: Build the sandbox image
         working-directory: ${{ github.workspace }}
         run: docker build -f sandbox/Dockerfile -t agentteam-sandbox:py312 toy-eval
