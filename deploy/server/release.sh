@@ -30,7 +30,8 @@ install -d -o agentteam -g agentteam /opt/agentteam
 chown -R agentteam:agentteam /opt/agentteam/app
 (
   cd "$APP/backend"
-  UV_PROJECT_ENVIRONMENT="$VENV" as_app uv sync --frozen --no-dev
+  # sudo drops the caller's environment, so the variable must be passed through `env`
+  as_app env UV_PROJECT_ENVIRONMENT="$VENV" uv sync --frozen --no-dev
   as_app uv pip install --python "$VENV/bin/python" "gunicorn==$GUNICORN_VERSION"
 )
 
