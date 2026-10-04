@@ -20,8 +20,9 @@ Last updated: 2026-10-03 (dashboard and Delivery built).
    with 10 harder cases.
 5. Production readiness. Done: CI eval gate (plumbing on every push; 10-case review gate on
    prompt/agent PRs; manual or weekly full run; baselines committed as JSON). Open:
-   record `evals/baselines/full.json` from a clean full run; API authentication, hardened
-   redaction, a test with two workers, runbook.
+   record `evals/baselines/full.json` from a clean full run; hardened redaction, a test with two
+   workers, runbook. Done: API authentication (password to JWT, rate limits, CORS allowlist,
+   authenticated fetch-based live streaming).
 6. Hosted deployment, including the Postgres cutover below.
 
 ## Postgres cutover (SQLite to a hosted database)
@@ -97,6 +98,9 @@ either option is a new backend behind it, not a rewrite.
 
 - Worker and API become separate services sharing Postgres; the worker needs outbound access to
   the Anthropic API and (for Delivery) GitHub.
-- Authentication on the API is mandatory before exposing it (the dashboard shows prompts, code
-  and task text).
+- Authentication is built (see README, "Authentication"). For a deploy: set `API_PASSWORD`,
+  `JWT_SECRET`, `AUTH_REQUIRED=1`, `CORS_ORIGINS` (if the frontend is on another origin) and
+  `TRUST_PROXY=1` behind a reverse proxy. The login lockout and rate limits are in-memory per API
+  process, so run one API process or accept limit x processes. Tokens are valid for a year by
+  choice; a leaked one stays valid until `JWT_SECRET` is rotated.
 - Secrets: set `ANTHROPIC_API_KEY` and `DATABASE_URL` as host environment variables; never commit.

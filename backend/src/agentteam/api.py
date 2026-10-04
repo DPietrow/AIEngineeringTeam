@@ -1,17 +1,20 @@
 """HTTP API: create/list/inspect runs and stream their events over SSE."""
 
 import json
+import logging
 import time
 from collections.abc import Iterator
 from typing import Any
 
 from flask import Blueprint, Response, current_app, jsonify, request
 
+from .auth import issue_token, password_matches
 from .db import connect
 from .prompts import config_hash
 from .tracing import Tracer
 
 bp = Blueprint("api", __name__, url_prefix="/api")
+auth_log = logging.getLogger("agentteam.auth")
 
 # done: finished (PR opened when delivery is on). failed: a retry cap was hit. error: crashed.
 # stopped: spend cap. rejected: a human declined at the approval gate. no_changes: the agents
@@ -34,8 +37,61 @@ def _loads(value: str | None) -> Any:
     return json.loads(value) if value else None
 
 
+def _client_key() -> str:
+    return request.remote_addr or "unknown"
+
+
+def _too_many(retry_after: float):
+    resp = jsonify(error="too many requests, slow down", retry_after_s=round(retry_after, 1))
+    resp.status_code = 429
+    resp.headers["Retry-After"] = str(max(1, int(retry_after + 0.999)))
+    return resp
+
+
+def _limited(name: str):
+    """Returns a 429 response if the named limiter is exhausted, else records a hit."""
+    limiter = current_app.extensions["limiters"][name]
+    wait = limiter.retry_after("global")
+    if wait > 0:
+        return _too_many(wait)
+    limiter.hit("global")
+    return None
+
+
+@bp.get("/auth/status")
+def auth_status():
+    """Public: lets the dashboard decide whether to show the login screen."""
+    return jsonify(auth_required=bool(current_app.config.get("API_PASSWORD")))
+
+
+@bp.post("/login")
+def login():
+    password = current_app.config.get("API_PASSWORD")
+    if not password:
+        return jsonify(error="authentication is not enabled on this server"), 404
+    limiter = current_app.extensions["limiters"]["login"]
+    wait = limiter.retry_after(_client_key())
+    if wait > 0:  # checked BEFORE the password, so a locked-out client cannot keep guessing
+        auth_log.warning("login locked out for %s", _client_key())
+        return _too_many(wait)
+    body = request.get_json(silent=True) or {}
+    supplied = body.get("password")
+    if not isinstance(supplied, str) or not password_matches(supplied, password):
+        limiter.hit(_client_key())
+        auth_log.warning("failed login from %s", _client_key())
+        return jsonify(error="wrong password"), 401
+    limiter.reset(_client_key())
+    token, expires_at = issue_token(
+        current_app.config["JWT_SECRET"], int(current_app.config["JWT_TTL_S"])
+    )
+    auth_log.info("login from %s", _client_key())
+    return jsonify(token=token, expires_at=expires_at)
+
+
 @bp.post("/runs")
 def create_run():
+    if (limited := _limited("create")) is not None:
+        return limited
     body = request.get_json(silent=True) or {}
     task = body.get("task")
     if not isinstance(task, str) or not task.strip():
@@ -130,6 +186,8 @@ def stream_events(
 
 
 def _decide(run_id: str, decision: str):
+    if (limited := _limited("decide")) is not None:
+        return limited
     body = request.get_json(silent=True) or {}
     reason = body.get("reason", "")
     if not isinstance(reason, str) or len(reason) > 1000:

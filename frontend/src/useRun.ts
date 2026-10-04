@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { fetchRun } from './api'
+import { streamSse } from './sse'
+import type { SseMessage } from './sse'
 import type { RunDetail, StreamEvent } from './types'
 import { TERMINAL } from './types'
 
@@ -10,24 +12,12 @@ export interface RunState {
   error: string | null
 }
 
-const EVENT_TYPES = [
-  'run.created',
-  'run.status',
-  'span.start',
-  'span.end',
-  'artifact.created',
-  'state.transition',
-  'loop.retry',
-  'gate.decision',
-  'llm.retry',
-  'run.recovered',
-]
-
 /**
  * Loads a run snapshot and follows its SSE stream. The stream is replayed from the
  * start (so the state timeline is complete), and every event triggers a debounced
  * snapshot refetch, which keeps the span tree and artifacts consistent with the DB.
- * EventSource reconnects on its own and resends Last-Event-ID, so nothing is lost.
+ * The stream is read with fetch (EventSource cannot send the Authorization header) and
+ * reconnects on its own with Last-Event-ID, so nothing is lost across a dropped connection.
  */
 export function useRun(runId: string): RunState {
   const [detail, setDetail] = useState<RunDetail | null>(null)
@@ -54,29 +44,37 @@ export function useRun(runId: string): RunState {
       timer.current = window.setTimeout(refresh, 250)
     }
 
-    refresh()
-    const es = new EventSource(`/api/runs/${runId}/events`)
-    const onEvent = (type: string) => (msg: MessageEvent<string>) => {
+    const onMessage = (m: SseMessage) => {
+      if (cancelled) return
+      if (m.event === 'end') {
+        setLive(false)
+        schedule()
+        return
+      }
       let data: Record<string, unknown> = {}
       try {
-        data = JSON.parse(msg.data) as Record<string, unknown>
+        data = JSON.parse(m.data) as Record<string, unknown>
       } catch {
         /* keep empty */
       }
-      const id = Number(msg.lastEventId) || 0
-      setEvents((prev) => (prev.some((e) => e.id === id) ? prev : [...prev, { id, type, data }]))
+      if (m.event === 'error') {
+        setError(String(data.error ?? 'stream error'))
+        return
+      }
+      const id = Number(m.id) || 0
+      setEvents((prev) =>
+        prev.some((e) => e.id === id) ? prev : [...prev, { id, type: m.event, data }],
+      )
       schedule()
     }
-    for (const t of EVENT_TYPES) es.addEventListener(t, onEvent(t))
-    es.addEventListener('end', () => {
-      setLive(false)
-      es.close()
-      schedule()
-    })
+
+    refresh()
+    const controller = new AbortController()
+    void streamSse(`/api/runs/${runId}/events`, onMessage, controller.signal)
     return () => {
       cancelled = true
       window.clearTimeout(timer.current)
-      es.close()
+      controller.abort()
     }
   }, [runId])
 

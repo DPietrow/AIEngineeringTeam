@@ -78,6 +78,21 @@ class Settings:
         "ghcr.io/github/github-mcp-server",
     )
 
+    # API authentication. Auth is enforced when api_password is set. jwt_secret signs the login
+    # tokens and must be a separate, long random value (never derived from the password, or
+    # anyone holding a token could guess the password offline). Tokens last jwt_ttl_s (default
+    # one year); rotating jwt_secret logs everyone out. auth_required refuses to start without
+    # a password, so a production deploy cannot silently run open.
+    api_password: str | None = None
+    jwt_secret: str | None = None
+    jwt_ttl_s: int = 365 * 24 * 3600
+    auth_required: bool = False
+    # Browser origins allowed to call the API cross-origin (e.g. the Vercel frontend), comma
+    # separated in CORS_ORIGINS. Empty = same-origin only. trust_proxy: the API sits behind
+    # exactly one reverse proxy (Caddy/nginx/Render) whose X-Forwarded-For can be believed.
+    cors_origins: tuple[str, ...] = ()
+    trust_proxy: bool = False
+
     @property
     def model_signature(self) -> str:
         """Model setup as one string, hashed into the config hash so runs with different
@@ -150,4 +165,12 @@ class Settings:
             sandbox_cpus=env("SANDBOX_CPUS", cls.sandbox_cpus),
             sandbox_pids_limit=int(env("SANDBOX_PIDS_LIMIT", cls.sandbox_pids_limit)),
             sandbox_timeout_s=int(env("SANDBOX_TIMEOUT_S", cls.sandbox_timeout_s)),
+            api_password=env("API_PASSWORD") or None,
+            jwt_secret=env("JWT_SECRET") or None,
+            jwt_ttl_s=int(env("JWT_TTL_S", cls.jwt_ttl_s)),
+            auth_required=env("AUTH_REQUIRED", "0").lower() in ("1", "true", "yes", "on"),
+            cors_origins=tuple(
+                o.strip().rstrip("/") for o in env("CORS_ORIGINS", "").split(",") if o.strip()
+            ),
+            trust_proxy=env("TRUST_PROXY", "0").lower() in ("1", "true", "yes", "on"),
         )

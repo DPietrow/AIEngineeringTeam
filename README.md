@@ -28,10 +28,44 @@ cd frontend
 npm install
 npm run dev      # http://localhost:5173, proxies /api to the Flask backend on :5000
 npm run lint
+npm test         # SSE parser tests (Node's built-in runner, Node 22.18+)
 npm run build
 ```
 
-Run the backend first so the dashboard's "Backend" status turns green.
+Run the backend first; the dashboard shows "Cannot reach the API" until it is up.
+
+### Authentication
+
+With `API_PASSWORD` unset the API is open (local use only; it logs a warning). To protect it,
+set these in `backend/.env`:
+
+```powershell
+# generate a signing secret (32+ chars, separate from the password)
+uv run python -c "import secrets; print(secrets.token_urlsafe(48))"
+# then in backend/.env:  API_PASSWORD=...   JWT_SECRET=<the value above>
+```
+
+Restart the API. The dashboard then shows a sign-in page. How it works:
+
+- `POST /api/login` with `{"password": ...}` returns a signed token (JWT, HS256) that is valid for
+  one year (`JWT_TTL_S`). The dashboard stores it and sends `Authorization: Bearer <token>` on
+  every call, including the live event stream (read with `fetch`, because the browser's
+  `EventSource` cannot send headers; it still reconnects and resumes with `Last-Event-ID`).
+- `/health`, `/api/health`, `/api/auth/status` and `/api/login` are public; everything else is
+  not. The About page is public too.
+- Change `JWT_SECRET` to log everyone out (a year is long, so a leaked token stays valid until
+  you do). Changing only `API_PASSWORD` does not revoke tokens already issued.
+- Abuse limits: 5 failed logins per client per 15 minutes (then HTTP 429), and approve/reject
+  and run creation are capped at 20 per minute. These are per API process.
+- Hosting: set `AUTH_REQUIRED=1` so the server refuses to start without a password,
+  `CORS_ORIGINS` if the frontend is on another domain (build it with `VITE_API_BASE`), and
+  `TRUST_PROXY=1` behind one reverse proxy.
+- Try it without the UI:
+
+```powershell
+$t = (Invoke-RestMethod -Method Post -Uri http://127.0.0.1:5000/api/login -ContentType application/json -Body '{"password":"..."}').token
+Invoke-RestMethod -Uri http://127.0.0.1:5000/api/runs -Headers @{Authorization="Bearer $t"}
+```
 
 ## Running the agent team
 

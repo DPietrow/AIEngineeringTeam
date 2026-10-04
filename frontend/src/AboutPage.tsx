@@ -339,9 +339,10 @@ const LIMIT_LIST = [
     suite is manual or weekly.
   </>,
   <>
-    <strong>Single worker, SQLite, no authentication.</strong> Leases make several workers safe in principle, but only one is
-    tested. The API has no auth, so it must not be exposed. Hosting means Postgres and a different sandbox (managed hosts
-    cannot start Docker containers).
+    <strong>Single worker, SQLite, single user.</strong> Leases make several workers safe in principle, but only one is
+    tested. Authentication is one shared password with no accounts or roles, and tokens last a year, so a leaked one stays
+    valid until the signing secret is rotated; login and rate limits are in memory per API process. Hosting means Postgres
+    and a different sandbox (managed hosts cannot start Docker containers).
   </>,
   <>
     <strong>Caching has a floor.</strong> Haiku 4.5 only caches prefixes of 4096 tokens or more, so very short loops do not
@@ -586,6 +587,12 @@ export default function About() {
                 <strong>The human gate:</strong> a reviewer-approved run waits for you. The approve/reject decision is a single
                 conditional database update, so a double click or a race cannot apply twice. Nothing is pushed before it.
               </>,
+              <>
+                <strong>Access control:</strong> one server password is exchanged for a signed token (JWT) that the dashboard sends
+                on every call. The server refuses to start with a password but no strong signing secret, locks a client out after
+                five failed logins, rate-limits approve, reject and run creation, and only answers cross-origin calls from a
+                configured allowlist.
+              </>,
             ]}
           />
         </Sub>
@@ -696,6 +703,9 @@ export default function About() {
             The run page subscribes to a server-sent-events stream. Each event has the database id, so a dropped connection
             resumes exactly where it left off. The server reads the run’s status before its events, so a finished run can never
             end the stream with events still missing. The page replays history, then refreshes its snapshot as events arrive.
+            The browser’s built-in <C>EventSource</C> cannot send an authorization header, so the page reads the same stream with{' '}
+            <C>fetch</C> and its own small parser: it reconnects with backoff, resends the last event id, and restarts a
+            connection that has gone silent for longer than three heartbeats.
           </P>
         </Sub>
 

@@ -185,7 +185,11 @@ Last updated: 2026-10-03 (after the eval harness).
 | Secret redaction before write | Keys and secrets scrubbed from everything persisted | `redact.py` | Done |
 | Secret hygiene in practice | Key lives only in a git-ignored `.env`; one leaked in chat was revoked | `.env.example`, `.gitignore` | Done |
 | Identity and credential isolation | Per-folder git identity and a push guard hook keep personal and work accounts apart | `.githooks`, git `includeIf` | Done |
-| API authentication | Required before any deployment | `api.py` | Planned |
+| API authentication | One shared password exchanged for a signed bearer token (JWT, HS256, valid one year, `exp` mandatory, algorithm never read from the token). No user table: the server holds `API_PASSWORD` and a separate `JWT_SECRET`; rotating the secret logs everyone out | `auth.py`, `app.py`, `api.py` | Done |
+| Brute-force and abuse limits | Login locks a client out after 5 failures in 15 min (checked before the password); approve/reject and run creation capped at 20/min; constant-time password check | `auth.py` `RateLimiter`, `api.py` | Done |
+| Fail-closed startup | A password without a 32+ char `JWT_SECRET` refuses to start; `AUTH_REQUIRED=1` refuses to start without a password | `app.py` | Done |
+| CORS allowlist | Only listed origins get CORS headers; bearer tokens, so no credentials mode and no CSRF surface | `app.py` | Done |
+| Authenticated live streaming | The browser's `EventSource` cannot send headers, so the dashboard reads the same SSE stream with `fetch`: own parser, reconnect with backoff, `Last-Event-ID` resume, stall watchdog | `frontend/src/sse.ts`, `sseParser.ts` | Done |
 
 ### Delivery and deployment
 
