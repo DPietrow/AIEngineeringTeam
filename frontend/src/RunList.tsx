@@ -4,10 +4,15 @@ import type { RunSummary } from './types'
 import { ago, usd } from './format'
 import { StatusBadge } from './ui'
 
-export default function RunList() {
+export default function RunList({
+  task,
+  onTaskChange,
+}: {
+  task: string
+  onTaskChange: (task: string) => void
+}) {
   const [runs, setRuns] = useState<RunSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [task, setTask] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [showEvals, setShowEvals] = useState(false)
   // Review-eval runs are tagged "[eval-review]" in their task text by the harness.
@@ -55,7 +60,7 @@ export default function RunList() {
       <form onSubmit={(e) => void submit(e)} className="flex gap-2">
         <input
           value={task}
-          onChange={(e) => setTask(e.target.value)}
+          onChange={(e) => onTaskChange(e.target.value)}
           placeholder="Describe a task for the team..."
           className="flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
         />
