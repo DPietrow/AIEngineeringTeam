@@ -98,7 +98,13 @@ uv run python -m agentteam.worker                   # terminal 2: worker
 - **Time limit:** a run longer than `RUN_TIMEOUT_S` ends `timed_out`.
 - **Crash recovery:** if the worker is killed mid-run, its lease expires and a worker (on startup
   and every 30 s) recovers the run: `running` becomes `error` (resubmit it), `delivering` goes
-  back to `approved` and is retried. Run only one worker unless you know why you want more.
+  back to `approved` and is retried.
+- **More than one worker** is supported: start another `python -m agentteam.worker` (each takes a
+  different run; claims are exclusive, tested with threads and real processes). A worker that
+  stalls past its lease and then wakes up stops at its next safe point and writes nothing, so it
+  cannot overwrite the worker that took its run over. SQLite serialises writes, so a handful of
+  workers is fine; more than that is a reason to move to Postgres. Mind your API rate limits and
+  spend caps: the spend caps are shared through the database, but the model's rate limit is not.
 
 ### Cleanup
 

@@ -27,6 +27,7 @@ from pydantic import BaseModel
 
 from .budget import SpendCapExceeded, SpendGuard
 from .db import connect, init_db, write_tx
+from .deadline import LeaseLost, current_fence
 from .pricing import compute_cost
 from .redact import redact
 
@@ -359,10 +360,26 @@ class Tracer:
         return latest
 
     def set_run_status(self, run_id: str, status: str, **extra: Any) -> None:
+        """Set a run's status. Under a worker lease (see deadline.Fence) the write only happens if
+        this worker still owns the run; otherwise LeaseLost is raised and nothing is written, so
+        a worker that stalled past its lease cannot overwrite what recovery or a new owner did."""
+        fence = current_fence()
+        if fence is not None and fence.lost.is_set():
+            raise LeaseLost(f"worker {fence.worker_id} no longer owns run {run_id}")
         with write_tx(self.db_path) as conn:
-            conn.execute(
-                "UPDATE runs SET status = ?, updated_at = ? WHERE id = ?", (status, _now(), run_id)
-            )
+            if fence is None:
+                cur = conn.execute(
+                    "UPDATE runs SET status = ?, updated_at = ? WHERE id = ?",
+                    (status, _now(), run_id),
+                )
+            else:
+                cur = conn.execute(
+                    "UPDATE runs SET status = ?, updated_at = ? WHERE id = ? AND claimed_by = ?",
+                    (status, _now(), run_id, fence.worker_id),
+                )
+                if cur.rowcount != 1:
+                    fence.lost.set()
+                    raise LeaseLost(f"worker {fence.worker_id} no longer owns run {run_id}")
             self._insert_event(conn, run_id, None, "run.status", {"status": status, **extra})
 
     @contextmanager

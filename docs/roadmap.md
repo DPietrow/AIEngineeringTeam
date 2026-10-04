@@ -20,8 +20,8 @@ Last updated: 2026-10-03 (dashboard and Delivery built).
    with 10 harder cases.
 5. Production readiness. Done: CI eval gate (plumbing on every push; 10-case review gate on
    prompt/agent PRs; manual or weekly full run; baselines committed as JSON). Open:
-   record `evals/baselines/full.json` from a clean full run; hardened redaction, a test with two
-   workers, runbook. Done: API authentication (password to JWT, rate limits, CORS allowlist,
+   record `evals/baselines/full.json` from a clean full run; hardened redaction, runbook. Done: multi-worker tests and lease fencing (found and fixed a real
+   stalled-worker overwrite bug), API authentication (password to JWT, rate limits, CORS allowlist,
    authenticated fetch-based live streaming).
 6. Hosted deployment, including the Postgres cutover below.
 

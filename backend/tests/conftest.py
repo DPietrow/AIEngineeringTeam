@@ -19,6 +19,30 @@ def git(cwd, *args):
     )
 
 
+# Settings that change behaviour and that a developer's shell or backend/.env may define. Tests
+# must not depend on them (for example, API_PASSWORD would make every API call return 401).
+_AMBIENT_ENV = (
+    "API_PASSWORD",
+    "JWT_SECRET",
+    "JWT_TTL_S",
+    "AUTH_REQUIRED",
+    "CORS_ORIGINS",
+    "TRUST_PROXY",
+    "GITHUB_TOKEN",
+    "GITHUB_REPO",
+)
+
+
+@pytest.fixture(autouse=True)
+def isolated_environment(monkeypatch):
+    """Keep tests independent of the developer's environment. Besides the shell, the eval CLI
+    calls load_dotenv() when its main() runs in a test, which would otherwise pull backend/.env
+    into os.environ for every test that runs after it."""
+    for name in _AMBIENT_ENV:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: False)
+
+
 @pytest.fixture
 def db_path(tmp_path):
     return tmp_path / "test.db"

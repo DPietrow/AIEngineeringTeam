@@ -13,8 +13,12 @@ FAILED rather than looping forever. Every state transition and retry is emitted 
 so the whole path is visible in the trace stream.
 """
 
+import functools
+import logging
+from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 from .agent_loop import AgentError
 from .agents.architect import Architect
@@ -24,7 +28,7 @@ from .agents.review import Review
 from .agents.testing import Testing
 from .budget import SpendCapExceeded
 from .config import Settings
-from .deadline import RunTimeout, check_deadline, run_deadline
+from .deadline import LeaseLost, RunTimeout, check_deadline, run_deadline
 from .llm import LLM
 from .schemas import DesignSpec, Patch, TestReport, Verdict
 from .tracing import Tracer, set_tracer
@@ -35,6 +39,22 @@ from .workspace import (
     existing_workspace,
     push_branch,
 )
+
+log = logging.getLogger("agentteam.orchestrator")
+
+
+def _abandon_if_lease_lost(fn: Callable[..., None]) -> Callable[..., None]:
+    """If this worker loses its lease mid-run (it stalled and another worker recovered the run),
+    stop quietly: the run now belongs to someone else, so nothing more may be written to it."""
+
+    @functools.wraps(fn)
+    def wrapper(self: Any, run_id: str, *args: Any, **kwargs: Any) -> None:
+        try:
+            fn(self, run_id, *args, **kwargs)
+        except LeaseLost as exc:
+            log.warning("run %s: abandoned, %s", run_id, exc)
+
+    return wrapper
 
 
 class State(StrEnum):
@@ -70,6 +90,7 @@ class Orchestrator:
     def _artifact(self, name: str, data: object) -> None:
         self.tracer.emit("artifact.created", {"artifact": name, "data": data})
 
+    @_abandon_if_lease_lost
     def execute(self, run_id: str, task: str) -> None:
         """Run a claimed run to completion. Never raises; failures become run status."""
         try:
@@ -88,6 +109,8 @@ class Orchestrator:
                 self.tracer.set_run_status(run_id, "no_changes", reason=outcome["reason"])
             else:
                 self.tracer.set_run_status(run_id, "failed", reason=outcome["reason"])
+        except LeaseLost:
+            raise  # not a failure of the run; see _abandon_if_lease_lost
         except SpendCapExceeded as exc:
             self.tracer.set_run_status(run_id, "stopped", reason=str(exc))
         except RunTimeout as exc:
@@ -96,6 +119,7 @@ class Orchestrator:
         except Exception as exc:
             self.tracer.set_run_status(run_id, "error", error=f"{type(exc).__name__}: {exc}")
 
+    @_abandon_if_lease_lost
     def deliver(self, run_id: str) -> None:
         """Deliver a run a human approved: push its branch, then have the Delivery agent open
         the PR. Never raises; failures become run status. The worker calls this for runs the
@@ -116,6 +140,7 @@ class Orchestrator:
                 workspace = existing_workspace(
                     self._toy_repo(), Path(s.workspaces_dir), run_id, s.github_base_branch
                 )
+                check_deadline()  # last safe point before the irreversible push
                 with self.tracer.span(
                     "git.push",
                     kind="step",
@@ -137,6 +162,8 @@ class Orchestrator:
                 # The branch now lives on GitHub; the local checkout is no longer needed.
                 self._cleanup(run_id, "pull request opened")
             self.tracer.set_run_status(run_id, "done")
+        except LeaseLost:
+            raise
         except SpendCapExceeded as exc:
             self.tracer.set_run_status(run_id, "stopped", reason=str(exc))
         except RunTimeout as exc:

@@ -339,8 +339,9 @@ const LIMIT_LIST = [
     suite is manual or weekly.
   </>,
   <>
-    <strong>Single worker, SQLite, single user.</strong> Leases make several workers safe in principle, but only one is
-    tested. Authentication is one shared password with no accounts or roles, and tokens last a year, so a leaked one stays
+    <strong>SQLite, single user.</strong> Several workers are supported and tested (exclusive claims, recovery, and a stalled
+    worker that wakes up cannot overwrite the worker that took its run), but SQLite serialises writes, so a handful is the
+    ceiling. Authentication is one shared password with no accounts or roles, and tokens last a year, so a leaked one stays
     valid until the signing secret is rotated; login and rate limits are in memory per API process. Hosting means Postgres
     and a different sandbox (managed hosts cannot start Docker containers).
   </>,
@@ -659,7 +660,10 @@ export default function About() {
               </>,
               <>
                 <strong>Crash recovery:</strong> the worker holds a lease on its run and renews it from a background thread. If
-                the process dies, the lease expires and a sweep recovers the run, closing any spans left “running”.
+                the process dies, the lease expires and a sweep recovers the run, closing any spans left “running”. The opposite
+                case is fenced too: a worker that stalls past its lease and wakes up finds its heartbeat has failed, stops at its
+                next safe point (including just before the irreversible git push), and its final status write is refused unless it
+                still owns the run.
               </>,
               <>
                 <strong>Cleanup:</strong> a delivered or rejected run’s worktree and branch are removed automatically; leftovers

@@ -12,6 +12,7 @@ import time
 
 from .budget import SpendGuard
 from .config import Settings
+from .deadline import Fence, lease_fence
 from .llm import LLM, AnthropicLLM, FakeLLM
 from .orchestrator import Orchestrator
 from .prompts import config_hash
@@ -69,6 +70,9 @@ class Heartbeat:
 
     def __init__(self, tracer: Tracer, run_id: str, worker_id: str, lease_s: float) -> None:
         self.tracer, self.run_id, self.worker_id, self.lease_s = tracer, run_id, worker_id, lease_s
+        # Shared with the pipeline through deadline.lease_fence: set when a renewal fails, so
+        # the run stops at its next safe point instead of working on a run it no longer owns.
+        self.fence = Fence(worker_id)
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._beat, daemon=True, name="lease-heartbeat")
 
@@ -77,6 +81,7 @@ class Heartbeat:
             try:
                 if not self.tracer.renew_lease(self.run_id, self.worker_id, self.lease_s):
                     log.warning("run %s: lease lost (recovered by another worker?)", self.run_id)
+                    self.fence.lost.set()
                     return
             except Exception:  # a transient DB error must not kill the run; try again next beat
                 log.exception("run %s: lease renewal failed", self.run_id)
@@ -117,10 +122,14 @@ def work_once(
     return True
 
 
+@contextlib.contextmanager
 def _leased(tracer: Tracer, run_id: str, worker_id: str | None, lease_s: float):
+    """Hold a lease on the run (heartbeat thread) and fence the pipeline against losing it."""
     if worker_id is None:
-        return contextlib.nullcontext()
-    return Heartbeat(tracer, run_id, worker_id, lease_s)
+        yield
+        return
+    with Heartbeat(tracer, run_id, worker_id, lease_s) as hb, lease_fence(hb.fence):
+        yield
 
 
 def recover(tracer: Tracer) -> None:
