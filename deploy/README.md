@@ -30,7 +30,8 @@ browser --HTTPS--> Caddy :443 --/api--> gunicorn 127.0.0.1:8000 <--SQLite--> wor
    - `deploy/.env.deploy` from `deploy/.env.deploy.example`
    - `deploy/.env.server` from `deploy/env.production.example` (API key, `API_PASSWORD`,
      `JWT_SECRET`, `GITHUB_TOKEN`). Values must not contain spaces, quotes or `#`.
-3. Commit your work: `deploy` ships `git archive HEAD`, so uncommitted changes are not sent.
+3. Commit your work: `deploy` ships `git archive <ref>` (default `HEAD`), so uncommitted changes
+   are not sent, and the first `up` needs the `deploy/` folder to be committed.
 
 ## Everyday use
 
@@ -60,6 +61,18 @@ variables `DO_HOSTNAME`, `DO_REGION`, `DO_SIZE`, `IDLE_MINUTES` (default 60). "I
 run in progress and no run activity or authenticated dashboard request for that long (the
 server's `GET /api/idle`, which itself does not count as activity). A run waiting at the
 approval gate does not block shutdown: its state is in the snapshot.
+
+## Auto-deploy from `main`
+
+`.github/workflows/deploy-main.yml` ships every commit that passes CI on `main` to the running
+server (opt-in: repository variable `AUTO_DEPLOY=true`). Secrets: `DO_TOKEN` and `DEPLOY_SSH_KEY`
+(the private half of a **dedicated CI key**: create it with `ssh-keygen -t ed25519 -f
+$HOME\.ssh\id_ed25519_agentteam_ci`, upload the `.pub` to DigitalOcean, and list both
+fingerprints in `DO_SSH_KEYS`, comma separated, **before the first `up`**: keys are only
+installed when a fresh server is created). The server keeps its own `/etc/agentteam/env`, so no
+application secrets live in GitHub. If the droplet is off, the workflow does nothing, and `up`
+deploys the latest code after restoring (`up --ref origin/main`, or `--no-deploy` to skip).
+Deploys and idle shutdowns share one concurrency group so they never overlap.
 
 ## Security notes
 

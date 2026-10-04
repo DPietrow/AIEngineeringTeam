@@ -18,7 +18,7 @@ on:
         default: "60"
 
 concurrency:
-  group: idle-shutdown
+  group: droplet # shared with deploy-main so a deploy never overlaps a snapshot
   cancel-in-progress: false # never interrupt a snapshot that is in progress
 
 jobs:

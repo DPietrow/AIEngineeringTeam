@@ -199,7 +199,7 @@ not in use. `python deploy\do_cli.py up` creates the server (restoring the newes
 there is one), `deploy` ships committed code, and `down` snapshots the disk, verifies the
 snapshot and then deletes the droplet, because a powered-off droplet is still billed. An opt-in
 workflow (`idle-shutdown.yml`) does the same automatically when nothing has happened for an hour.
-Runbook, costs and safety rules: `deploy/README.md`. The first deployment uses SQLite on the
+Another opt-in workflow (`deploy-main.yml`) deploys each commit that passes CI on `main`, like Vercel/Render. Runbook, costs and safety rules: `deploy/README.md`. The first deployment uses SQLite on the
 droplet's disk; the Postgres cutover follows (`docs/roadmap.md`).
 
 ## Docs

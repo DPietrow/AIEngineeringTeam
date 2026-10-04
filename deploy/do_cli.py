@@ -2,7 +2,7 @@
 """Spin the AIEngineeringTeam server up and down on DigitalOcean. Standard library only.
 
     python deploy/do_cli.py up            create the server (from the newest snapshot if any)
-    python deploy/do_cli.py deploy        ship the committed code to the running server
+    python deploy/do_cli.py deploy        ship committed code (--ref, --if-running) to the server
     python deploy/do_cli.py down          snapshot, verify, then DESTROY the server (stops billing)
     python deploy/do_cli.py status        what exists, and what it costs while idle
     python deploy/do_cli.py idle-check    exit 0 if the server is idle; --shutdown-after MIN acts
@@ -343,7 +343,7 @@ class Ops:
 
     # -- commands --
 
-    def up(self) -> str:
+    def up(self, *, ref: str = "HEAD", deploy_after_restore: bool = True) -> str:
         existing = self.droplet()
         if existing:
             ip = self.ip_of(existing)
@@ -370,19 +370,25 @@ class Ops:
         else:
             if not self.cfg.ssh_keys:
                 raise DeployError("DO_SSH_KEYS is empty: a fresh droplet would be unreachable")
+            if not self.cfg.server_env_file.exists():
+                raise DeployError(
+                    f"{self.cfg.server_env_file} not found: a fresh server needs it "
+                    "(copy deploy/env.production.example)"
+                )
             self.log(f"no snapshot yet: creating a fresh {self.cfg.size} ({self.cfg.image})")
         created = self.api.request("POST", "/droplets", payload)["droplet"]
         droplet = self.wait_active(created["id"])
         ip = self.ip_of(droplet) or ""
         self.log(f"droplet {droplet['id']} is active at {ip}; waiting for SSH")
         self.shell.wait_ready(ip)
-        if restoring:
-            host = self.apply_host(ip)
-            self.wait_healthy(ip)
+        if restoring and not deploy_after_restore:
+            self.log("restored without redeploying (the snapshot's code is what runs)")
         else:
-            self.deploy(ip=ip)
-            host = self.apply_host(ip)
-            self.wait_healthy(ip)
+            # Fresh: installs everything. Restored: brings the snapshot's code up to date, since
+            # it may be older than the latest commit.
+            self.deploy(ip=ip, ref=ref)
+        host = self.apply_host(ip)
+        self.wait_healthy(ip)
         self.log(f"up: https://{host}  (http://{ip} if the host is :80)")
         return host
 
@@ -393,15 +399,19 @@ class Ops:
             300,
         )
 
-    def deploy(self, ip: str | None = None) -> None:
+    def deploy(self, ip: str | None = None, *, ref: str = "HEAD", if_running: bool = False) -> bool:
+        """Ships the code at `ref`. With if_running, a switched-off server is not an error (the
+        next `up` deploys). The local env file is optional once the server has its own copy."""
         if ip is None:
             d = self.droplet()
             ip = self.ip_of(d) if d else None
             if not ip:
+                if if_running:
+                    self.log("no server is running: nothing to deploy (`up` deploys on start)")
+                    return False
                 raise DeployError("no running server; run `up` first")
         env_file = self.cfg.server_env_file
-        if not env_file.exists():
-            raise DeployError(f"{env_file} not found (copy deploy/env.production.example)")
+        have_env = env_file.exists()
         with tempfile.TemporaryDirectory() as tmp:
             archive = Path(tmp) / "agentteam.tgz"
             subprocess.run(
@@ -413,15 +423,24 @@ class Ops:
                     "--format=tar.gz",
                     "-o",
                     str(archive),
-                    "HEAD",
+                    ref,
                 ],
                 check=True,
             )
-            self.log(
-                "uploading the committed code (git archive HEAD; uncommitted changes are not sent)"
-            )
+            self.log(f"uploading {ref} (git archive; uncommitted changes are not sent)")
             self.shell.upload(ip, archive, "/tmp/agentteam.tgz")
-        self.shell.upload(ip, env_file, "/tmp/agentteam.env")
+        if have_env:
+            self.shell.upload(ip, env_file, "/tmp/agentteam.env")
+            install_env = (
+                "install -m 640 -g agentteam /tmp/agentteam.env /etc/agentteam/env; "
+                "rm /tmp/agentteam.env; "
+            )
+        else:
+            # CI has no secrets file: keep the one already on the server, or stop.
+            install_env = (
+                "test -f /etc/agentteam/env || { echo 'server has no /etc/agentteam/env' >&2; "
+                "exit 1; }; "
+            )
         self.shell.run(
             ip,
             "set -e; rm -rf /opt/agentteam/app; mkdir -p /opt/agentteam/app; "
@@ -430,12 +449,12 @@ class Ops:
             "bash /opt/agentteam/app/deploy/server/provision.sh "
             "&& touch /opt/agentteam/.provisioned; fi; "
             "install -d -m 750 -g agentteam /etc/agentteam; "
-            "install -m 640 -g agentteam /tmp/agentteam.env /etc/agentteam/env; "
-            "rm /tmp/agentteam.env; "
-            "bash /opt/agentteam/app/deploy/server/release.sh",
+            + install_env
+            + "bash /opt/agentteam/app/deploy/server/release.sh",
             timeout=1800,
         )
         self.log("deploy: done")
+        return True
 
     def down(self, *, force: bool = False) -> None:
         d = self.droplet()
@@ -575,8 +594,16 @@ def make_probe(cfg: Config) -> Callable[[str], dict | None]:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="do_cli", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="command", required=True)
-    sub.add_parser("up", help="create the server (from the newest snapshot if there is one)")
-    sub.add_parser("deploy", help="upload the committed code and restart the services")
+    up = sub.add_parser("up", help="create the server (from the newest snapshot if there is one)")
+    up.add_argument("--ref", default="HEAD", help="git ref to deploy (default: HEAD)")
+    up.add_argument(
+        "--no-deploy", action="store_true", help="after a restore, skip redeploying the code"
+    )
+    dep = sub.add_parser("deploy", help="upload the committed code and restart the services")
+    dep.add_argument("--ref", default="HEAD", help="git ref to deploy (default: HEAD)")
+    dep.add_argument(
+        "--if-running", action="store_true", help="succeed quietly when no server is running"
+    )
     down = sub.add_parser("down", help="snapshot, verify, then delete the droplet")
     down.add_argument("--force", action="store_true", help="skip the idle check")
     sub.add_parser("status", help="show the droplet, snapshots and costs")
@@ -594,9 +621,9 @@ def main(argv: list[str] | None = None) -> int:
         cfg = Config.load()
         ops = Ops(cfg, DigitalOcean(cfg.token), SshShell(cfg.ssh_identity), make_probe(cfg))
         if args.command == "up":
-            ops.up()
+            ops.up(ref=args.ref, deploy_after_restore=not args.no_deploy)
         elif args.command == "deploy":
-            ops.deploy()
+            ops.deploy(ref=args.ref, if_running=args.if_running)
         elif args.command == "down":
             ops.down(force=args.force)
         elif args.command == "status":

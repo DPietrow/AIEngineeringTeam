@@ -119,6 +119,8 @@ class FakeShell:
 
 
 def make_ops(api, shell=None, idle=None, **cfg_overrides):
+    # Never read a developer's real deploy/.env.server: default to a file that does not exist.
+    cfg_overrides.setdefault("server_env_file", Path("/nonexistent/server.env"))
     cfg = do_cli.Config(token="t", ssh_keys=("aa:bb",), **cfg_overrides)
     logs: list[str] = []
     ops = do_cli.Ops(
@@ -257,46 +259,86 @@ def test_up_restores_from_the_newest_snapshot_and_repoints_dns():
     api.records.append({"id": 1, "type": "A", "name": "agentteam", "data": "203.0.113.7"})
     shell = FakeShell()
     ops = make_ops(api, shell=shell, hostname="agentteam.example.com", domain="example.com")
-    host = ops.up()
+    host = ops.up(deploy_after_restore=False)
     assert host == "agentteam.example.com"
     assert api.created_with["image"] == int(newest)
     assert api.created_with["tags"] == ["agentteam"]
     assert api.records[0]["data"] == "198.51.100.9"  # the new droplet's address
     assert any("set-host.sh agentteam.example.com" in c for c in shell.commands)
-    assert not shell.uploads, "a restore must not redeploy"
+    assert not shell.uploads, "--no-deploy must not redeploy"
+
+
+def test_up_after_a_restore_redeploys_the_latest_code(monkeypatch):
+    """A snapshot can hold older code than main; starting the server brings it up to date."""
+    api = FakeDO()
+    api.add_snapshot("agentteam-20260901-000000", "2026-09-01T00:00:00Z")
+    archives = []
+    monkeypatch.setattr(do_cli.subprocess, "run", lambda cmd, **k: archives.append(cmd))
+    shell = FakeShell()
+    make_ops(api, shell=shell).up(ref="origin/main")
+    assert archives and archives[0][-1] == "origin/main"
+    assert "/tmp/agentteam.tgz" in shell.uploads
+    release = [c for c in shell.commands if "release.sh" in c]
+    assert release and "rm /tmp/agentteam.env" not in release[0]  # no local env file in CI
+    assert "test -f /etc/agentteam/env" in release[0]
+
+
+def test_deploy_if_running_is_quiet_when_the_server_is_off():
+    api = FakeDO()
+    shell = FakeShell()
+    ops = make_ops(api, shell=shell)
+    assert ops.deploy(if_running=True) is False
+    assert not shell.uploads and not shell.commands
+    with pytest.raises(do_cli.DeployError, match="no running server"):
+        ops.deploy()
+
+
+def test_deploy_uploads_the_local_env_file_when_there_is_one(monkeypatch, tmp_path):
+    api = FakeDO()
+    api.add_droplet()
+    env = tmp_path / "server.env"
+    env.write_text("X=1\n")
+    monkeypatch.setattr(do_cli.subprocess, "run", lambda *a, **k: None)
+    shell = FakeShell()
+    ops = make_ops(api, shell=shell, server_env_file=env)
+    assert ops.deploy() is True
+    assert "/tmp/agentteam.env" in shell.uploads
+    assert any("install -m 640 -g agentteam /tmp/agentteam.env" in c for c in shell.commands)
 
 
 def test_up_without_a_domain_uses_a_wildcard_dns_name():
     api = FakeDO()
     api.add_snapshot("agentteam-20260901-000000", "2026-09-01T00:00:00Z")
-    host = make_ops(api).up()
+    host = make_ops(api).up(deploy_after_restore=False)
     assert host == "198-51-100-9.sslip.io"
 
 
-def test_up_with_no_snapshot_creates_a_fresh_server_and_deploys(monkeypatch):
+def test_up_with_no_snapshot_creates_a_fresh_server_and_deploys(monkeypatch, tmp_path):
     api = FakeDO()
     ran = []
     monkeypatch.setattr(do_cli.subprocess, "run", lambda *a, **k: ran.append(a[0]))
-    shell = FakeShell()
-    ops = make_ops(api, shell=shell)
-    # the archive step is faked, so the env file must "exist"
-    env = Path(__file__).parent / "_tmp_server.env"
+    env = tmp_path / "server.env"
     env.write_text("X=1\n")
-    try:
-        ops.cfg = do_cli.Config(token="t", ssh_keys=("aa:bb",), server_env_file=env)
-        ops.up()
-    finally:
-        env.unlink()
+    shell = FakeShell()
+    make_ops(api, shell=shell, server_env_file=env).up()
     assert api.created_with["image"] == "ubuntu-24-04-x64"
     assert "/tmp/agentteam.tgz" in shell.uploads and "/tmp/agentteam.env" in shell.uploads
     assert any("release.sh" in c for c in shell.commands)
     assert any(c[:3] == ["git", "-C", c[2]] for c in ran)
 
 
+def test_up_refuses_a_fresh_server_with_no_env_file_before_creating_anything(tmp_path):
+    api = FakeDO()
+    ops = make_ops(api, server_env_file=tmp_path / "missing.env")
+    with pytest.raises(do_cli.DeployError, match="needs it"):
+        ops.up()
+    assert not api.droplets
+
+
 def test_up_refuses_a_fresh_server_nobody_could_log_in_to():
     api = FakeDO()
     ops = do_cli.Ops(
-        do_cli.Config(token="t", ssh_keys=()),
+        do_cli.Config(token="t", ssh_keys=(), server_env_file=Path("/nonexistent")),
         api,
         FakeShell(),
         probe=lambda ip: None,
