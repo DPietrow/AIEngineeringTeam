@@ -231,7 +231,7 @@ export function MapDiagram() {
       <Box x={704} y={128} w={272} h={56} title="Eval: was it good?" lines={['hidden tests, graders,', 'pass@k, cost per pass']} />
       <Box x={704} y={202} w={272} h={56} title="Observe: was it healthy?" lines={['tokens, cache hits, cost,', 'latency, errors, retries']} />
       <Box x={704} y={276} w={272} h={50} title="Diagnose" lines={['trace tree and failure list']} />
-      <Box x={704} y={344} w={272} h={60} title="Gate" lines={['compare exits 1 on regression', '(automated CI gate: not yet)']} tone="amber" />
+      <Box x={704} y={344} w={272} h={60} title="Gate" lines={['evals gate: exit 1 on regression', '(CI: PRs touching prompts/agents)']} tone="amber" />
       <Box x={704} y={422} w={272} h={72} title="Release" lines={['new prompt file or variant,', 'model per agent, caps;', 'config hash on every run']} tone="green" />
       <Arrow p={p} d="M840 110 V126" m="b" />
       <Arrow p={p} d="M840 184 V200" m="b" />
@@ -364,7 +364,7 @@ export function OpsLoopDiagram() {
       {step(0, '1. Trace', 'tracing.py: spans,', 'events, live SSE')}
       {step(1, '2. Evaluate + observe', 'evals/, dashboard:', 'quality, cost, latency')}
       {step(2, '3. Diagnose', 'trace tree, eval', 'failure list')}
-      {step(3, '4. Gate', 'evals compare:', 'exit 1 on regression', 'amber')}
+      {step(3, '4. Gate', 'evals gate + baselines:', 'exit 1 on regression', 'amber')}
       {step(4, '5. Release', 'prompts/, MODEL_*,', 'config hash per run', 'green')}
       <Arrow p={p} d="M160 68 H190" m="b" />
       <Arrow p={p} d="M342 68 H372" m="b" />

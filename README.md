@@ -124,6 +124,31 @@ pulls in the `hard_cases.py` review cases; hidden acceptance tests are in `accep
 Scorecards are saved to `backend/data/evals/`. Review cases tagged `hard` (subtle bugs, tests
 pass) are run with `--only review --tag hard`.
 
+### Evals in CI
+
+- **Every push** (`ci.yml`): a free fake-LLM eval run plus a gate self-check. It proves the harness
+  still works; it says nothing about quality.
+- **Pull requests that touch prompts, agent code, config or the suite** (`evals.yml`, job
+  `review-gate`): the 10 `hard` review cases, 1 trial each (about $0.25), gated against the
+  committed baseline `backend/evals/baselines/review-hard.json`. The gate is per case: it fails only
+  if a case the baseline *always* got right is now wrong, and retries once automatically to
+  absorb model flakiness. Skipped (with a notice) when no API key is available.
+- **Manual or weekly** (`evals.yml`, job `full`): the whole suite, 3 trials, Docker sandbox,
+  gated against `backend/evals/baselines/full.json` if you have committed one. Run it from the
+  Actions tab ("Run workflow", scope `full`); set the repository variable `WEEKLY_EVALS=true` to
+  also run it on Mondays.
+
+One-time GitHub setup: secret `ANTHROPIC_API_KEY` (use a dedicated key with a low monthly
+spend limit); secret `TOY_REPO_TOKEN` only if `agentteam-toy` is private.
+
+Baselines are plain JSON in the repo, so they are reviewed like code. Re-record one when you
+change the suite or deliberately accept new behaviour:
+
+```powershell
+uv run python -m agentteam.evals baseline <label-or-scorecard.json> --out evals/baselines/review-hard.json
+uv run python -m agentteam.evals gate evals/baselines/review-hard.json <candidate-label-or-json>   # exit 1 on regression
+```
+
 Evals count towards `GLOBAL_SPEND_CAP_USD` (default $10, summed over everything in the local
 database), so raise it before a large eval session.
 

@@ -259,6 +259,23 @@ trustworthy at 3 trials per case. For the reviewer, Sonnet matched Haiku overall
 the one subtle case (not-stripped), but one case at 3 trials per run is weak evidence; the next
 step would be more cases of that kind (spec details the test does not exercise).
 
+### Eval gate in CI (added 2026-10-03)
+
+| Piece | What it does | Where |
+|---|---|---|
+| Plumbing check on every push | Fake-LLM eval run + gate self-check; proves the harness works, costs nothing | `.github/workflows/ci.yml` |
+| Review gate on PRs touching prompts/agents/config/suite | 10 hard review cases, 1 trial (~$0.25), compared per case with a committed baseline; one automatic retry | `.github/workflows/evals.yml`, `evals/baselines/review-hard.json` |
+| Full suite, manual or weekly | Whole suite, 3 trials, Docker sandbox; gated if `baselines/full.json` exists | `evals.yml` job `full` |
+| Baselines as files | `evals baseline` freezes a run into a small JSON file that is reviewed like code | `evals/__main__.py` |
+| Per-case stability gate | Fails only if a case the baseline *always* got right is now wrong (within a tolerance: 0 for 1 trial, 0.34 for 3). Aggregates are too noisy to gate on | `evals/report.py` `gate` |
+
+Design choices worth remembering: gate on per-case stability rather than a mean, because with 1-3
+trials a single flaky trial moves the average more than a real regression would; retry once in CI
+rather than raise the trial count, because a real regression fails twice and a flake does not;
+spend is bounded three ways (path filters, `--max-cost`, a dedicated low-limit API key); the
+baseline must be re-recorded when the suite changes (the gate prints a note when the suite hash
+differs).
+
 ## 4. How to keep this file current
 
 When adding a component: add a row to the right table, set its status, and if something went

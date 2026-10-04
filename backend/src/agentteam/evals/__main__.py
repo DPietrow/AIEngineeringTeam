@@ -2,12 +2,15 @@
 
 run      run the suite and save a scorecard      (--label, --trials, --cases, --only, --fake ...)
 compare  compare two saved runs by label or id   (exits 1 if the candidate regressed)
+gate     CI check against a committed baseline   (exits 1 if a stable case now fails)
+baseline freeze a saved run as evals/baselines/*.json
 list     list saved eval runs
 show     print the scorecard of a saved run
 """
 
 import argparse
 import dataclasses
+import json
 import os
 import subprocess
 import sys
@@ -17,7 +20,7 @@ from ..config import Settings
 from ..llm import FakeLLM
 from ..prompts import active_variants
 from ..worker import build_llm, build_tracer
-from .report import compare, scorecard
+from .report import compare, gate, scorecard
 from .runner import CaseResult, report_to_json, run_eval
 from .store import list_eval_runs, load_eval_run, save_eval_run
 from .suite import load_suite
@@ -116,15 +119,80 @@ def cmd_run(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
-def cmd_compare(args: argparse.Namespace, settings: Settings) -> int:
-    a, b = (load_eval_run(settings.database_path, ref) for ref in (args.baseline, args.candidate))
-    for ref, run in ((args.baseline, a), (args.candidate, b)):
+REQUIRED_KEYS = ("label", "suite_hash", "config_hash", "model", "trials", "summary")
+
+
+def load_ref(settings: Settings, ref: str) -> dict | None:
+    """A saved eval run: a path to a .json scorecard/baseline file, else an id or label in the
+    database. Files are how baselines live in the repo and how CI reads them."""
+    path = Path(ref)
+    if ref.endswith(".json") and path.is_file():
+        data = json.loads(path.read_text(encoding="utf-8"))
+        missing = [k for k in REQUIRED_KEYS if k not in data]
+        if missing:
+            raise ValueError(f"{ref}: not an eval scorecard/baseline (missing {missing})")
+        data.setdefault("total_cost_usd", 0.0)
+        data.setdefault("truncated", False)
+        return data
+    return load_eval_run(settings.database_path, ref)
+
+
+def _load_both(settings: Settings, refs: tuple[str, str]) -> tuple[dict, dict] | None:
+    runs = []
+    for ref in refs:
+        try:
+            run = load_ref(settings, ref)
+        except ValueError as exc:
+            print(exc)
+            return None
         if run is None:
             print(f"No eval run found for {ref!r}. Try: list")
-            return 2
-    md, regressions = compare(a, b)
+            return None
+        runs.append(run)
+    return runs[0], runs[1]
+
+
+def cmd_compare(args: argparse.Namespace, settings: Settings) -> int:
+    runs = _load_both(settings, (args.baseline, args.candidate))
+    if runs is None:
+        return 2
+    md, regressions = compare(*runs)
     print(md)
     return 1 if regressions else 0
+
+
+def cmd_gate(args: argparse.Namespace, settings: Settings) -> int:
+    runs = _load_both(settings, (args.baseline, args.candidate))
+    if runs is None:
+        return 2
+    md, failures = gate(*runs, tolerance=args.tolerance)
+    print(md)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:  # shows up on the GitHub Actions run page
+        with open(summary, "a", encoding="utf-8") as fh:
+            fh.write(md + "\n")
+    return 1 if failures else 0
+
+
+def cmd_baseline(args: argparse.Namespace, settings: Settings) -> int:
+    """Freeze a saved run as a compact baseline file to commit (no traces, no patches)."""
+    try:
+        run = load_ref(settings, args.ref)
+    except ValueError as exc:
+        print(exc)
+        return 2
+    if run is None:
+        print(f"No eval run found for {args.ref!r}. Try: list")
+        return 2
+    keep = ("id", "label", "suite", "suite_hash", "config_hash", "model", "trials")
+    keep += ("started_at", "total_cost_usd", "truncated", "summary")
+    slim = {k: run[k] for k in keep if k in run}
+    slim["label"] = args.name or run["label"]
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(slim, indent=2) + "\n", encoding="utf-8")
+    print(f"Wrote baseline {out} (from run {run.get('id', '?')}, model {run['model']})")
+    return 0
 
 
 def cmd_list(_: argparse.Namespace, settings: Settings) -> int:
@@ -179,6 +247,23 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("baseline")
     c.add_argument("candidate")
     c.set_defaults(fn=cmd_compare)
+
+    g = sub.add_parser("gate", help="CI gate: exit 1 if a case the baseline always got right fails")
+    g.add_argument("baseline", help="label, run id, or path to a baseline .json")
+    g.add_argument("candidate", help="label, run id, or path to a scorecard .json")
+    g.add_argument(
+        "--tolerance",
+        type=float,
+        default=0.0,
+        help="correctness a stable case may lose: 0 for 1 trial, ~0.34 for 3 trials",
+    )
+    g.set_defaults(fn=cmd_gate)
+
+    b = sub.add_parser("baseline", help="write a compact baseline file from a saved run")
+    b.add_argument("ref", help="label, run id, or path to a scorecard .json")
+    b.add_argument("--out", required=True, help="e.g. evals/baselines/review-hard.json")
+    b.add_argument("--name", help="label to store in the file (default: the run's label)")
+    b.set_defaults(fn=cmd_baseline)
 
     sub.add_parser("list").set_defaults(fn=cmd_list)
     s = sub.add_parser("show")

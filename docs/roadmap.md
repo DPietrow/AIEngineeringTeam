@@ -15,9 +15,13 @@ Last updated: 2026-10-03 (dashboard and Delivery built).
 4. Resilience: **built**: API retries with backoff, run recovery after worker crash (leases),
    per-run wall-clock timeout, worktree cleanup, prompt caching, per-agent models (all built).
    Still open: trace payload trimming, delivery retry after a post-push error, a "retry run"
-   button. To do with real money: measure caching (on vs `PROMPT_CACHING=0`) and a Sonnet
-   reviewer (`MODEL_REVIEW`) against the Haiku baseline, then record both in the results log.
-5. Production readiness: API authentication, hardened redaction, runbook.
+   button. Measured (see results log): caching saves roughly 35-50% per case; the Sonnet reviewer
+   matched Haiku overall and was better on one subtle case. The review suite was extended
+   with 10 harder cases.
+5. Production readiness. Done: CI eval gate (plumbing on every push; 10-case review gate on
+   prompt/agent PRs; manual or weekly full run; baselines committed as JSON). Open:
+   record `evals/baselines/full.json` from a clean full run; API authentication, hardened
+   redaction, a test with two workers, runbook.
 6. Hosted deployment, including the Postgres cutover below.
 
 ## Postgres cutover (SQLite to a hosted database)

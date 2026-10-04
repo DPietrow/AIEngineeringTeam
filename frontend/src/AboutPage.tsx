@@ -333,8 +333,10 @@ const LIMIT_LIST = [
     trials each, so it is suggestive, not conclusive.
   </>,
   <>
-    <strong>The eval gate is manual.</strong> <C>evals compare</C> exits non-zero on a regression, but it is not wired into CI
-    yet.
+    <strong>The CI gate is narrow.</strong> Every push runs a free plumbing check; real-model evals run only on pull requests
+    that touch prompts or agent code (10 review cases, about $0.25) and on demand. It gates per case against a committed
+    baseline, so it catches a reviewer that stops catching something it always caught, not gradual drift. The full
+    suite is manual or weekly.
   </>,
   <>
     <strong>Single worker, SQLite, no authentication.</strong> Leases make several workers safe in principle, but only one is

@@ -22,21 +22,31 @@ jobs:
       - name: Test
         run: uv run pytest
 
-  frontend:
+  # Free end-to-end check of the eval harness (fake LLM, no API key, no Docker): the runner,
+  # graders, persistence, scorecard and the gate against the committed baseline all still work.
+  # It says nothing about quality; that is evals.yml's job.
+  evals-plumbing:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: frontend
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+      - uses: astral-sh/setup-uv@v5
       - name: Install dependencies
-        run: npm ci
-      - name: Lint
-        run: npm run lint
-      - name: Build
-        run: npm run build
+        run: uv sync --locked
+      - name: Check out a pristine toy repo
+        uses: actions/checkout@v4
+        with:
+          repository: DPietrow/agentteam-toy
+          ref: 626e075fcb42e0e8ba26bc26b8cbd73adc472794 # "Scaffolded toy notes API"
+          path: toy-eval
+          token: ${{ secrets.TOY_REPO_TOKEN || github.token }}
+      - name: Fake-LLM eval run
+        env:
+          EVAL_TOY_REPO_PATH: ${{ github.workspace }}/toy-eval
+          LLM_MODE: fake
+          SANDBOX_MODE: local
+        run: uv run python -m agentteam.evals run --fake --sandbox local --trials 1 --label ci-plumbing
+      - name: Exercise the gate (candidate = baseline must pass)
+        run: uv run python -m agentteam.evals gate evals/baselines/review-hard.json evals/baselines/review-hard.json

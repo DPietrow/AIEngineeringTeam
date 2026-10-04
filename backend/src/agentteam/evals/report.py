@@ -107,6 +107,64 @@ _LOWER_IS_BETTER = {
 }
 
 
+def gate(
+    baseline: dict[str, Any], candidate: dict[str, Any], tolerance: float = 0.0
+) -> tuple[str, list[str]]:
+    """CI regression gate. Returns (markdown, failures); any failure means "do not merge".
+
+    Aggregate numbers are too noisy to gate on with a few trials, so this is judged per case:
+    a case the baseline got right every time (a *stable* case) must still be right, within
+    `tolerance` (0 for a single-trial CI run; about 0.34 for a 3-trial run, which lets one flaky
+    trial through). Cases that were already flaky in the baseline cannot fail the gate, and
+    cases the candidate did not run (a subset) are skipped. This catches real regressions
+    ("the reviewer now approves the admin-endpoint patch it used to catch") without flaking on
+    noise.
+    """
+    lines = [
+        f"# Eval gate: {candidate['label']} vs baseline {baseline['label']}",
+        "",
+        f"- baseline: model `{baseline['model']}`, config `{baseline['config_hash']}`, "
+        f"suite `{baseline['suite_hash']}`, {baseline['trials']} trial(s) per case",
+        f"- candidate: model `{candidate['model']}`, config `{candidate['config_hash']}`, "
+        f"suite `{candidate['suite_hash']}`, {candidate['trials']} trial(s) per case, "
+        f"cost ${candidate['total_cost_usd']:.3f}",
+        f"- tolerance: {tolerance:.2f} (a stable case may lose at most this much correctness)",
+    ]
+    if baseline["suite_hash"] != candidate["suite_hash"]:
+        lines.append(
+            "- **note: the suite changed since the baseline was recorded**; only cases present "
+            "in both are compared. Re-record the baseline when you change the suite."
+        )
+    failures: list[str] = []
+    if candidate.get("truncated"):
+        failures.append("the run was cut short by the eval spend cap, so it is incomplete")
+
+    compared = 0
+    lines += ["", "| case | baseline | candidate | verdict |", "|---|---|---|---|"]
+    for section in ("review", "coding"):
+        sa, sb = baseline["summary"].get(section), candidate["summary"].get(section)
+        if not sa or not sb:
+            continue
+        for cid, da in sa["by_case"].items():
+            db = sb["by_case"].get(cid)
+            if db is None:
+                continue
+            compared += 1
+            pa, pb = da.get("pass_rate", 0.0), db.get("pass_rate", 0.0)
+            stable = pa >= 0.99
+            regressed = stable and pb < pa - tolerance - 1e-9
+            if regressed:
+                failures.append(
+                    f"{section} case {cid}: always right in the baseline, now {_pct(pb)}"
+                )
+            verdict = "REGRESSION" if regressed else ("ok" if stable else "flaky in baseline")
+            lines.append(f"| {cid} | {_pct(pa)} | {_pct(pb)} | {verdict} |")
+    if compared == 0:
+        failures.append("no cases in common with the baseline, so nothing was checked")
+    lines += ["", "**Failures:** " + ("; ".join(failures) if failures else "none"), ""]
+    return "\n".join(lines), failures
+
+
 def compare(a: dict[str, Any], b: dict[str, Any]) -> tuple[str, list[str]]:
     """Compare run `a` (baseline) with `b` (candidate). Returns (markdown, regressions)."""
     lines = [
