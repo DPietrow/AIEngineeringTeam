@@ -20,6 +20,7 @@ REBUILD_SANDBOX=0
 
 as_app() { sudo -u agentteam -H env HOME="$HOME_DIR" "$@"; }
 
+sed -i 's/\r$//' "$ENV_FILE" # tolerate a file saved with Windows line endings
 set -a; . "$ENV_FILE"; set +a
 : "${GITHUB_REPO:?GITHUB_REPO must be set in $ENV_FILE}"
 

@@ -463,3 +463,10 @@ def test_api_client_does_not_retry_client_errors():
     with pytest.raises(do_cli.DeployError, match="401"):
         client.request("GET", "/droplets")
     assert len(attempts) == 1
+
+
+def test_a_windows_env_file_is_uploaded_with_unix_line_endings(tmp_path):
+    env = tmp_path / "server.env"
+    env.write_bytes(b"\xef\xbb\xbfAPI_PASSWORD=abc\r\nJWT_SECRET=xyz\r\n")
+    fixed = do_cli.normalized_env(env).read_bytes()
+    assert fixed == b"API_PASSWORD=abc\nJWT_SECRET=xyz\n"

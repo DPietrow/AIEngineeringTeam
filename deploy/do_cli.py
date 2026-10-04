@@ -235,6 +235,15 @@ def http_json(
         return json.loads(resp.read())
 
 
+def normalized_env(path: Path) -> Path:
+    """A copy of the env file with Unix line endings. A file saved on Windows has CRLF, and the
+    carriage return would end up inside every value (and break the shell that loads it)."""
+    text = path.read_text(encoding="utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
+    out = Path(tempfile.mkdtemp()) / "agentteam.env"
+    out.write_text(text.rstrip("\n") + "\n", encoding="utf-8", newline="\n")
+    return out
+
+
 # --- operations ------------------------------------------------------------------------------
 
 
@@ -436,7 +445,7 @@ class Ops:
             self.log(f"uploading {ref} (git archive; uncommitted changes are not sent)")
             self.shell.upload(ip, archive, "/tmp/agentteam.tgz")
         if have_env:
-            self.shell.upload(ip, env_file, "/tmp/agentteam.env")
+            self.shell.upload(ip, normalized_env(env_file), "/tmp/agentteam.env")
             install_env = (
                 "install -m 640 -g agentteam /tmp/agentteam.env /etc/agentteam/env; "
                 "rm /tmp/agentteam.env; "
