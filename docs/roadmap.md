@@ -26,8 +26,10 @@ Last updated: 2026-10-04 (deployment scripts built).
 6. Hosted deployment, including the Postgres cutover below. Decided: **DigitalOcean**, one
    droplet (Caddy + gunicorn + worker + Docker). **Scripts built** (`deploy/`): provisioning,
    release, systemd units, Caddy, `do_cli.py up/down/deploy/status`, snapshot-then-destroy
-   spin-down (a powered-off droplet is still billed), opt-in idle auto-shutdown workflow. Still to
-   do: first live deploy (not yet run end to end), then the Postgres cutover.
+   spin-down (a powered-off droplet is still billed), opt-in idle auto-shutdown workflow. **Verified live** at
+   https://agentteam.aiengineering.team: fresh install, a full run through the approval gate, `down`
+   (snapshot, verify, delete) and `up` (restore, DNS, redeploy). Still to do: turn on auto-deploy
+   and idle shutdown, then the Postgres cutover.
 
 ## Postgres cutover (SQLite to a hosted database)
 
