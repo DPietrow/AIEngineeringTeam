@@ -1,0 +1,124 @@
+{
+  "id": "c528da5bec0c",
+  "label": "review-hard",
+  "suite": "toy-notes-v1",
+  "suite_hash": "0cbec8773e9a",
+  "config_hash": "8aa30c743e5a",
+  "model": "claude-haiku-4-5-20251001 (architect=claude-sonnet-5-5)",
+  "trials": 3,
+  "started_at": "2026-10-04T02:43:17.597739+00:00",
+  "total_cost_usd": 0.726859,
+  "truncated": false,
+  "summary": {
+    "review": {
+      "trials": 30,
+      "accuracy": 0.9666666666666667,
+      "catch_rate": 0.9523809523809523,
+      "false_block_rate": 0.0,
+      "total_cost_usd": 0.7269,
+      "by_tag": {},
+      "by_case": {
+        "hard-bad-id-reuse-after-delete": {
+          "pass_rate": 1.0,
+          "trials": 3,
+          "decisions": [
+            "changes_requested",
+            "changes_requested",
+            "changes_requested"
+          ],
+          "expected": "changes_requested"
+        },
+        "hard-bad-update-drops-id": {
+          "pass_rate": 1.0,
+          "trials": 3,
+          "decisions": [
+            "changes_requested",
+            "changes_requested",
+            "changes_requested"
+          ],
+          "expected": "changes_requested"
+        },
+        "hard-bad-update-not-stripped": {
+          "pass_rate": 0.6666666666666666,
+          "trials": 3,
+          "decisions": [
+            "approved",
+            "changes_requested",
+            "changes_requested"
+          ],
+          "expected": "changes_requested"
+        },
+        "hard-bad-search-prefix-only": {
+          "pass_rate": 1.0,
+          "trials": 3,
+          "decisions": [
+            "changes_requested",
+            "changes_requested",
+            "changes_requested"
+          ],
+          "expected": "changes_requested"
+        },
+        "hard-bad-search-writes-log-file": {
+          "pass_rate": 1.0,
+          "trials": 3,
+          "decisions": [
+            "changes_requested",
+            "changes_requested",
+            "changes_requested"
+          ],
+          "expected": "changes_requested"
+        },
+        "hard-bad-drops-validation-case": {
+          "pass_rate": 1.0,
+          "trials": 3,
+          "decisions": [
+            "changes_requested",
+            "changes_requested",
+            "changes_requested"
+          ],
+          "expected": "changes_requested"
+        },
+        "hard-bad-count-ignores-empty-case": {
+          "pass_rate": 1.0,
+          "trials": 3,
+          "decisions": [
+            "changes_requested",
+            "changes_requested",
+            "changes_requested"
+          ],
+          "expected": "changes_requested"
+        },
+        "hard-good-delete-with-store-tests": {
+          "pass_rate": 1.0,
+          "trials": 3,
+          "decisions": [
+            "approved",
+            "approved",
+            "approved"
+          ],
+          "expected": "approved"
+        },
+        "hard-good-count-thorough": {
+          "pass_rate": 1.0,
+          "trials": 3,
+          "decisions": [
+            "approved",
+            "approved",
+            "approved"
+          ],
+          "expected": "approved"
+        },
+        "hard-good-update-extra-edge-test": {
+          "pass_rate": 1.0,
+          "trials": 3,
+          "decisions": [
+            "approved",
+            "approved",
+            "approved"
+          ],
+          "expected": "approved"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,49 @@
+name: Idle shutdown
+
+# Safety net against paying for a forgotten server. Every 30 minutes it asks the server whether
+# anything has happened lately; if nothing has for IDLE_MINUTES, it snapshots the droplet and
+# deletes it (deploy/do_cli.py down). Restart it later with `python deploy/do_cli.py up`.
+#
+# Opt-in: nothing runs until you set the repository variable IDLE_SHUTDOWN=true
+# (Settings > Secrets and variables > Actions > Variables). Required secrets: DO_TOKEN,
+# API_PASSWORD, DO_SSH_KEYS. Optional variables: DO_HOSTNAME, DO_REGION, DO_SIZE, IDLE_MINUTES.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      idle_minutes:
+        description: "Shut down if idle at least this long (minutes)"
+        default: "60"
+
+concurrency:
+  group: droplet # shared with deploy-main so a deploy never overlaps a snapshot
+  cancel-in-progress: false # never interrupt a snapshot that is in progress
+
+jobs:
+  check:
+    if: ${{ vars.IDLE_SHUTDOWN == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Shut down if idle
+        env:
+          DO_TOKEN: ${{ secrets.DO_TOKEN }}
+          API_PASSWORD: ${{ secrets.API_PASSWORD }}
+          DO_SSH_KEYS: ${{ secrets.DO_SSH_KEYS }}
+          DO_HOSTNAME: ${{ vars.DO_HOSTNAME }}
+          DO_REGION: ${{ vars.DO_REGION }}
+          DO_SIZE: ${{ vars.DO_SIZE }}
+          LIMIT: ${{ github.event.inputs.idle_minutes || vars.IDLE_MINUTES || '60' }}
+        run: |
+          # Exit 1 just means "not idle yet" (or unreachable): fine. Any other code is a failure.
+          set +e
+          python deploy/do_cli.py idle-check --shutdown-after "$LIMIT"
+          code=$?
+          [ "$code" -eq 1 ] && exit 0
+          exit "$code"

@@ -1,0 +1,33 @@
+[Unit]
+Description=AIEngineeringTeam worker (runs the agents)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+User=agentteam
+Group=agentteam
+SupplementaryGroups=docker
+WorkingDirectory=/opt/agentteam/app/backend
+EnvironmentFile=/etc/agentteam/env
+Environment=HOME=/var/lib/agentteam/home
+ExecStart=/opt/agentteam/venv/bin/python -m agentteam.worker
+Restart=always
+RestartSec=5
+# Let a run in progress finish its current step before a stop/restart kills it.
+TimeoutStopSec=60
+
+# Hardening. The worker must write the data dir and the toy repo (worktrees, branches), and talk
+# to Docker, so it gets less lockdown than the API. Model-written code never runs here: it runs
+# inside the sandbox container (no network, read-only root, dropped capabilities).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/agentteam /opt/agentteam/toy
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

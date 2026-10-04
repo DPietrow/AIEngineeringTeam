@@ -1,0 +1,174 @@
+name: Evals
+
+# Real-model evals. These cost money, so they only run when something that can change agent
+# behaviour changed (prompts, agent code, model/config, the suite), or on demand.
+#
+# One-time setup (repo Settings > Secrets and variables > Actions):
+#   secret   ANTHROPIC_API_KEY    use a dedicated key with a low monthly spend limit
+#   secret   TOY_REPO_TOKEN       only if agentteam-toy is private (read access to it)
+#   variable WEEKLY_EVALS=true    optional: enables the scheduled full run below
+#
+# The review gate compares against backend/evals/baselines/review-hard.json. Re-record that file
+# (see README, "Evals in CI") when you change the suite or deliberately accept a new behaviour.
+
+on:
+  pull_request:
+    paths:
+      - "backend/prompts/**"
+      - "backend/src/agentteam/agents/**"
+      - "backend/src/agentteam/agent_loop.py"
+      - "backend/src/agentteam/llm.py"
+      - "backend/src/agentteam/config.py"
+      - "backend/src/agentteam/evals/**"
+      - "backend/evals/**"
+      - ".github/workflows/evals.yml"
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "What to run"
+        type: choice
+        options: [review-gate, full]
+        default: review-gate
+      trials:
+        description: "Trials per case (full run)"
+        default: "3"
+      max_cost:
+        description: "Stop starting trials past this many USD"
+        default: "6"
+  schedule:
+    - cron: "0 9 * * 1" # Mondays 09:00 UTC; only runs if the WEEKLY_EVALS variable is "true"
+
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EVAL_TOY_REPO_PATH: ${{ github.workspace }}/toy-eval
+  GLOBAL_SPEND_CAP_USD: "50" # the local eval database starts empty each run; --max-cost is the real limit
+  RUN_SPEND_CAP_USD: "1.00"
+
+jobs:
+  # Cheap and frequent: the 10 hard review cases, 1 trial each (about $0.25). Fails only if a case
+  # the baseline always got right is now wrong; one automatic retry absorbs model flakiness.
+  review-gate:
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.scope == 'review-gate')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - name: Is an API key available?
+        id: key
+        env:
+          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then echo "has_key=true" >> "$GITHUB_OUTPUT"; else
+            echo "::notice::No ANTHROPIC_API_KEY (fork PR or secret not set): skipping real evals."
+            echo "has_key=false" >> "$GITHUB_OUTPUT"; fi
+      - uses: astral-sh/setup-uv@v5
+        if: steps.key.outputs.has_key == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.key.outputs.has_key == 'true'
+        with:
+          node-version: 24
+      - name: Install dependencies
+        if: steps.key.outputs.has_key == 'true'
+        run: uv sync --locked
+      - name: Check out a pristine toy repo
+        if: steps.key.outputs.has_key == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: DPietrow/agentteam-toy
+          ref: 626e075fcb42e0e8ba26bc26b8cbd73adc472794
+          path: toy-eval
+          token: ${{ secrets.TOY_REPO_TOKEN || github.token }}
+      - name: Prepare the toy repo (a branch named main, no remote)
+        if: steps.key.outputs.has_key == 'true'
+        working-directory: ${{ github.workspace }}/toy-eval
+        run: |
+          git checkout -B main
+          git remote remove origin
+      - name: Run the hard review cases and gate against the baseline
+        if: steps.key.outputs.has_key == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LLM_MODE: anthropic
+        run: |
+          set -u
+          attempt() {
+            # both steps must succeed: no harness errors, and no regression against the baseline
+            uv run python -m agentteam.evals run --only review --tag hard --trials 1 \
+              --max-cost 1 --label "$1" --fail-on-error &&
+            uv run python -m agentteam.evals gate evals/baselines/review-hard.json \
+              "data/evals/$1.json" --tolerance 0
+          }
+          if attempt ci-review; then exit 0; fi
+          echo "::warning::First attempt failed the gate; retrying once to rule out model flakiness."
+          attempt ci-review-retry
+      - name: Upload scorecards
+        if: always() && steps.key.outputs.has_key == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-gate-scorecards
+          path: backend/data/evals/ci-review*.md
+
+  # Thorough and slow: the whole suite with real Docker-sandboxed tests, 3 trials per case.
+  # Manual, or weekly when the WEEKLY_EVALS variable is "true". Gated against
+  # backend/evals/baselines/full.json if that file exists; otherwise it just reports.
+  full:
+    if: (github.event_name == 'workflow_dispatch' && inputs.scope == 'full') || (github.event_name == 'schedule' && vars.WEEKLY_EVALS == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Check out a pristine toy repo
+        uses: actions/checkout@v4
+        with:
+          repository: DPietrow/agentteam-toy
+          ref: 626e075fcb42e0e8ba26bc26b8cbd73adc472794
+          path: toy-eval
+          token: ${{ secrets.TOY_REPO_TOKEN || github.token }}
+      - name: Prepare the toy repo (a branch named main, no remote)
+        working-directory: ${{ github.workspace }}/toy-eval
+        run: |
+          git checkout -B main
+          git remote remove origin
+      - name: Build the sandbox image
+        working-directory: ${{ github.workspace }}
+        run: docker build -f sandbox/Dockerfile -t agentteam-sandbox:py312 toy-eval
+      - name: Run the full suite
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LLM_MODE: anthropic
+          TRIALS: ${{ inputs.trials || '3' }}
+          MAX_COST: ${{ inputs.max_cost || '6' }}
+        run: |
+          uv run python -m agentteam.evals run --trials "$TRIALS" --max-cost "$MAX_COST" \
+            --label "ci-full-$(date +%Y%m%d)"
+      - name: Gate against the full baseline (if one is committed)
+        run: |
+          if [ -f evals/baselines/full.json ]; then
+            # 3 trials per case: allow one flaky trial of three
+            uv run python -m agentteam.evals gate evals/baselines/full.json \
+              "data/evals/ci-full-$(date +%Y%m%d).json" --tolerance 0.34
+          else
+            echo "::notice::No evals/baselines/full.json yet; report only. Create one with the baseline command."
+          fi
+      - name: Upload scorecards
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-eval-scorecards
+          path: |
+            backend/data/evals/ci-full-*.md
+            backend/data/evals/ci-full-*.json

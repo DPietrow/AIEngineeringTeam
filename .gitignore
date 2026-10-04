@@ -1,0 +1,32 @@
+# Secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Local data (SQLite, run workspaces, eval output)
+backend/data/
+*.db
+*.db-shm
+*.db-wal
+/data/
+/workspaces/
+
+# Editors / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,27 @@
+[Unit]
+Description=AIEngineeringTeam API (gunicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=agentteam
+Group=agentteam
+WorkingDirectory=/opt/agentteam/app/backend
+EnvironmentFile=/etc/agentteam/env
+Environment=HOME=/var/lib/agentteam/home
+ExecStart=/opt/agentteam/venv/bin/gunicorn -c /opt/agentteam/app/deploy/server/gunicorn.conf.py "agentteam.app:create_app()"
+Restart=always
+RestartSec=3
+
+# Hardening: the API only needs to read the code and write the data directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/agentteam
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

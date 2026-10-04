@@ -1,0 +1,42 @@
+# SITE_ADDRESS comes from /etc/caddy/site.env (set by set-host.sh): a hostname gets an automatic
+# Let's Encrypt certificate; ":80" is plain HTTP for testing.
+{$SITE_ADDRESS::80} {
+	# The API, including the live event streams. flush_interval -1 sends every SSE frame at once
+	# instead of buffering; no read timeout so a quiet stream is not cut (the app heartbeats).
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8000 {
+			flush_interval -1
+			transport http {
+				read_timeout 0
+			}
+		}
+	}
+	handle /health {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	# The dashboard (static files built by release.sh). Hash routing, so no rewrites are needed.
+	handle {
+		root * /var/www/agentteam
+		try_files {path} /index.html
+		file_server
+		# Never compress the API (it would delay SSE); static files are fine.
+		encode zstd gzip
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 10mb
+			roll_keep 3
+		}
+	}
+}

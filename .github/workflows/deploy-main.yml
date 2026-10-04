@@ -1,0 +1,55 @@
+name: Deploy main
+
+# Keeps the running server on the latest `main`, like Vercel/Render do. It waits for CI to pass
+# on main, then ships that exact commit with `do_cli.py deploy --if-running`. If the droplet is
+# switched off nothing happens: the next `do_cli.py up` deploys the latest code on start.
+#
+# Opt-in: set the repository variable AUTO_DEPLOY=true. Required secrets:
+#   DO_TOKEN         DigitalOcean API token
+#   DEPLOY_SSH_KEY   private key whose public half is registered in DigitalOcean (a dedicated
+#                    CI key, not your personal one) and listed in DO_SSH_KEYS when the server
+#                    was first created
+# The server keeps its own /etc/agentteam/env, so no application secrets are needed here.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# Shared with idle-shutdown so a deploy never overlaps a snapshot/delete.
+concurrency:
+  group: droplet
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      vars.AUTO_DEPLOY == 'true' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the deploy key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+      - name: Deploy this commit if the server is running
+        env:
+          DO_TOKEN: ${{ secrets.DO_TOKEN }}
+          DO_HOSTNAME: ${{ vars.DO_HOSTNAME }}
+          DO_REGION: ${{ vars.DO_REGION }}
+          DO_SIZE: ${{ vars.DO_SIZE }}
+        run: |
+          export SSH_IDENTITY="$HOME/.ssh/id_deploy"
+          python deploy/do_cli.py deploy --if-running --ref "$(git rev-parse HEAD)"

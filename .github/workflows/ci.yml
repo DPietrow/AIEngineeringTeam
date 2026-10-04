@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check . ../deploy --config pyproject.toml
+      - name: Format check
+        run: uv run ruff format --check . ../deploy --config pyproject.toml
+      - name: Test
+        run: uv run pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+
+  # Free end-to-end check of the eval harness (fake LLM, no API key, no Docker): the runner,
+  # graders, persistence, scorecard and the gate against the committed baseline all still work.
+  # It says nothing about quality; that is evals.yml's job.
+  evals-plumbing:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Check out a pristine toy repo
+        uses: actions/checkout@v4
+        with:
+          repository: DPietrow/agentteam-toy
+          ref: 626e075fcb42e0e8ba26bc26b8cbd73adc472794 # "Scaffolded toy notes API"
+          path: toy-eval
+          token: ${{ secrets.TOY_REPO_TOKEN || github.token }}
+      - name: Prepare the toy repo (a branch named main, no remote)
+        # Checking out a commit gives a detached HEAD with no branch; the harness branches off
+        # "main", and evals must never be able to push.
+        working-directory: ${{ github.workspace }}/toy-eval
+        run: |
+          git checkout -B main
+          git remote remove origin
+      - name: Fake-LLM eval run
+        env:
+          EVAL_TOY_REPO_PATH: ${{ github.workspace }}/toy-eval
+          LLM_MODE: fake
+          SANDBOX_MODE: local
+        # --fail-on-error: wrong answers are expected from the fake model, but a harness error
+        # (git, setup, crash) in any case must fail the build.
+        run: uv run python -m agentteam.evals run --fake --sandbox local --trials 1 --label ci-plumbing --fail-on-error
+      - name: Exercise the gate (candidate = baseline must pass)
+        run: uv run python -m agentteam.evals gate evals/baselines/review-hard.json evals/baselines/review-hard.json

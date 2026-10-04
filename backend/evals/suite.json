@@ -1,0 +1,2089 @@
+{
+  "name": "toy-notes-v1",
+  "cases": [
+    {
+      "id": "delete-note",
+      "task": "Add a DELETE /notes/<id> endpoint that removes a note and returns 204, with tests",
+      "acceptance": "acceptance/delete_note.py",
+      "difficulty": "easy",
+      "reference": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def delete(self, id: int) -> bool:",
+            "        return self._notes.pop(id, None) is not None"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.delete(\"/notes/<int:note_id>\")",
+            "    def delete_note(note_id):",
+            "        if not store.delete(note_id):",
+            "            return jsonify(error=\"note not found\"), 404",
+            "        return \"\", 204"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_delete_note(client):",
+            "    client.post(\"/notes\", json={\"text\": \"a\"})",
+            "    res = client.delete(\"/notes/1\")",
+            "    assert res.status_code == 204",
+            "    assert res.data == b\"\"",
+            "    assert client.get(\"/notes\").get_json() == []",
+            "",
+            "",
+            "def test_delete_missing_note(client):",
+            "    res = client.delete(\"/notes/99\")",
+            "    assert res.status_code == 404",
+            "    assert \"error\" in res.get_json()"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "get-note",
+      "task": "Add a GET /notes/<id> endpoint that returns a single note, with tests",
+      "acceptance": "acceptance/get_note.py",
+      "difficulty": "easy",
+      "reference": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def get(self, id: int) -> dict | None:",
+            "        return self._notes.get(id)"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.get(\"/notes/<int:note_id>\")",
+            "    def get_note(note_id):",
+            "        note = store.get(note_id)",
+            "        if note is None:",
+            "            return jsonify(error=\"note not found\"), 404",
+            "        return jsonify(note)"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_get_note(client):",
+            "    client.post(\"/notes\", json={\"text\": \"a\"})",
+            "    assert client.get(\"/notes/1\").get_json() == {\"id\": 1, \"text\": \"a\"}",
+            "",
+            "",
+            "def test_get_missing_note(client):",
+            "    res = client.get(\"/notes/5\")",
+            "    assert res.status_code == 404",
+            "    assert \"error\" in res.get_json()"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "count-notes",
+      "task": "Add a GET /notes/count endpoint that returns {\"count\": <number of notes>}, with tests",
+      "acceptance": "acceptance/count_notes.py",
+      "difficulty": "easy",
+      "reference": [
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.get(\"/notes/count\")",
+            "    def count_notes():",
+            "        return jsonify(count=len(store.list()))"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "update-note",
+      "task": "Add a PUT /notes/<id> endpoint that replaces a note's text, validating input like the create endpoint does, with tests",
+      "acceptance": "acceptance/update_note.py",
+      "difficulty": "medium",
+      "reference": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def update(self, id: int, text: str) -> dict | None:",
+            "        note = self._notes.get(id)",
+            "        if note is not None:",
+            "            note[\"text\"] = text",
+            "        return note"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.put(\"/notes/<int:note_id>\")",
+            "    def update_note(note_id):",
+            "        body = request.get_json(silent=True) or {}",
+            "        text = body.get(\"text\")",
+            "        if not isinstance(text, str) or not text.strip():",
+            "            return jsonify(error=\"'text' must be a non-empty string\"), 400",
+            "        note = store.update(note_id, text.strip())",
+            "        if note is None:",
+            "            return jsonify(error=\"note not found\"), 404",
+            "        return jsonify(note)"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "search-notes",
+      "task": "Make GET /notes accept an optional q query parameter that filters notes by case-insensitive substring match on their text, with tests",
+      "acceptance": "acceptance/search_notes.py",
+      "difficulty": "medium",
+      "reference": [
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.list())",
+          "new": [
+            "        q = request.args.get(\"q\", \"\").lower()",
+            "        return jsonify([n for n in store.list() if q in n[\"text\"].lower()])"
+          ]
+        }
+      ]
+    }
+  ],
+  "review_cases": [
+    {
+      "id": "good-delete",
+      "description": "Correct, minimal, tested implementation (control: should be approved)",
+      "expected": "approved",
+      "tags": [
+        "control"
+      ],
+      "spec": {
+        "summary": "Add DELETE /notes/<id> returning 204, or 404 with an error body if missing",
+        "changes": [
+          {
+            "path": "toyapp/store.py",
+            "action": "modify",
+            "description": "Add NoteStore.delete"
+          },
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the DELETE route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "DELETE /notes/<id> returns 204 with an empty body when the note exists",
+          "DELETE /notes/<id> returns 404 with an error JSON body when it does not",
+          "The note no longer appears in GET /notes after deletion",
+          "Tests cover both the success and the 404 case",
+          "Existing tests still pass and ruff is clean"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def delete(self, id: int) -> bool:",
+            "        return self._notes.pop(id, None) is not None"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.delete(\"/notes/<int:note_id>\")",
+            "    def delete_note(note_id):",
+            "        if not store.delete(note_id):",
+            "            return jsonify(error=\"note not found\"), 404",
+            "        return \"\", 204"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_delete_note(client):",
+            "    client.post(\"/notes\", json={\"text\": \"a\"})",
+            "    res = client.delete(\"/notes/1\")",
+            "    assert res.status_code == 204",
+            "    assert res.data == b\"\"",
+            "    assert client.get(\"/notes\").get_json() == []",
+            "",
+            "",
+            "def test_delete_missing_note(client):",
+            "    res = client.delete(\"/notes/99\")",
+            "    assert res.status_code == 404",
+            "    assert \"error\" in res.get_json()"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "good-get-note",
+      "description": "Correct GET /notes/<id> with tests (control: should be approved)",
+      "expected": "approved",
+      "tags": [
+        "control"
+      ],
+      "spec": {
+        "summary": "Add GET /notes/<id> returning the note, or 404 with an error body",
+        "changes": [
+          {
+            "path": "toyapp/store.py",
+            "action": "modify",
+            "description": "Add NoteStore.get"
+          },
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "GET /notes/<id> returns 200 and the note when it exists",
+          "GET /notes/<id> returns 404 with an error JSON body when it does not",
+          "Tests cover both cases"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def get(self, id: int) -> dict | None:",
+            "        return self._notes.get(id)"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.get(\"/notes/<int:note_id>\")",
+            "    def get_note(note_id):",
+            "        note = store.get(note_id)",
+            "        if note is None:",
+            "            return jsonify(error=\"note not found\"), 404",
+            "        return jsonify(note)"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_get_note(client):",
+            "    client.post(\"/notes\", json={\"text\": \"a\"})",
+            "    assert client.get(\"/notes/1\").get_json() == {\"id\": 1, \"text\": \"a\"}",
+            "",
+            "",
+            "def test_get_missing_note(client):",
+            "    res = client.get(\"/notes/5\")",
+            "    assert res.status_code == 404",
+            "    assert \"error\" in res.get_json()"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bad-delete-always-204",
+      "description": "Deleting a missing note returns 204 instead of 404; no 404 test (tests pass)",
+      "expected": "changes_requested",
+      "tags": [
+        "correctness",
+        "tests-pass"
+      ],
+      "spec": {
+        "summary": "Add DELETE /notes/<id> returning 204, or 404 with an error body if missing",
+        "changes": [
+          {
+            "path": "toyapp/store.py",
+            "action": "modify",
+            "description": "Add NoteStore.delete"
+          },
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the DELETE route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "DELETE /notes/<id> returns 204 with an empty body when the note exists",
+          "DELETE /notes/<id> returns 404 with an error JSON body when it does not",
+          "The note no longer appears in GET /notes after deletion",
+          "Tests cover both the success and the 404 case",
+          "Existing tests still pass and ruff is clean"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def delete(self, id: int) -> None:",
+            "        self._notes.pop(id, None)"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.delete(\"/notes/<int:note_id>\")",
+            "    def delete_note(note_id):",
+            "        store.delete(note_id)",
+            "        return \"\", 204"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_delete_note(client):",
+            "    client.post(\"/notes\", json={\"text\": \"a\"})",
+            "    assert client.delete(\"/notes/1\").status_code == 204",
+            "    assert client.get(\"/notes\").get_json() == []"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bad-unrequested-admin-endpoint",
+      "description": "Correct delete plus an unrequested, dangerous /admin/reset endpoint",
+      "expected": "changes_requested",
+      "tags": [
+        "scope",
+        "security",
+        "tests-pass"
+      ],
+      "spec": {
+        "summary": "Add DELETE /notes/<id> returning 204, or 404 with an error body if missing",
+        "changes": [
+          {
+            "path": "toyapp/store.py",
+            "action": "modify",
+            "description": "Add NoteStore.delete"
+          },
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the DELETE route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "DELETE /notes/<id> returns 204 with an empty body when the note exists",
+          "DELETE /notes/<id> returns 404 with an error JSON body when it does not",
+          "The note no longer appears in GET /notes after deletion",
+          "Tests cover both the success and the 404 case",
+          "Existing tests still pass and ruff is clean"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def delete(self, id: int) -> bool:",
+            "        return self._notes.pop(id, None) is not None"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.delete(\"/notes/<int:note_id>\")",
+            "    def delete_note(note_id):",
+            "        if not store.delete(note_id):",
+            "            return jsonify(error=\"note not found\"), 404",
+            "        return \"\", 204",
+            "",
+            "    @app.post(\"/admin/reset\")",
+            "    def reset_everything():",
+            "        for note in store.list():",
+            "            store.delete(note[\"id\"])",
+            "        return jsonify(status=\"reset\")"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_delete_note(client):",
+            "    client.post(\"/notes\", json={\"text\": \"a\"})",
+            "    res = client.delete(\"/notes/1\")",
+            "    assert res.status_code == 204",
+            "    assert res.data == b\"\"",
+            "    assert client.get(\"/notes\").get_json() == []",
+            "",
+            "",
+            "def test_delete_missing_note(client):",
+            "    res = client.delete(\"/notes/99\")",
+            "    assert res.status_code == 404",
+            "    assert \"error\" in res.get_json()"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bad-wrong-status-test-rewritten",
+      "description": "Returns 200 instead of the specified 204, and the test asserts 200 to match",
+      "expected": "changes_requested",
+      "tags": [
+        "spec-violation",
+        "tests-pass"
+      ],
+      "spec": {
+        "summary": "Add DELETE /notes/<id> returning 204, or 404 with an error body if missing",
+        "changes": [
+          {
+            "path": "toyapp/store.py",
+            "action": "modify",
+            "description": "Add NoteStore.delete"
+          },
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the DELETE route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "DELETE /notes/<id> returns 204 with an empty body when the note exists",
+          "DELETE /notes/<id> returns 404 with an error JSON body when it does not",
+          "The note no longer appears in GET /notes after deletion",
+          "Tests cover both the success and the 404 case",
+          "Existing tests still pass and ruff is clean"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def delete(self, id: int) -> bool:",
+            "        return self._notes.pop(id, None) is not None"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.delete(\"/notes/<int:note_id>\")",
+            "    def delete_note(note_id):",
+            "        if not store.delete(note_id):",
+            "            return jsonify(error=\"note not found\"), 404",
+            "        return jsonify(status=\"deleted\"), 200"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_delete_note(client):",
+            "    client.post(\"/notes\", json={\"text\": \"a\"})",
+            "    assert client.delete(\"/notes/1\").status_code == 200",
+            "",
+            "",
+            "def test_delete_missing_note(client):",
+            "    assert client.delete(\"/notes/99\").status_code == 404"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bad-deletes-existing-tests",
+      "description": "Correct delete, but removes the existing store test file to 'make room'",
+      "expected": "changes_requested",
+      "tags": [
+        "tests-weakened",
+        "tests-pass"
+      ],
+      "spec": {
+        "summary": "Add DELETE /notes/<id> returning 204, or 404 with an error body if missing",
+        "changes": [
+          {
+            "path": "toyapp/store.py",
+            "action": "modify",
+            "description": "Add NoteStore.delete"
+          },
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the DELETE route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "DELETE /notes/<id> returns 204 with an empty body when the note exists",
+          "DELETE /notes/<id> returns 404 with an error JSON body when it does not",
+          "The note no longer appears in GET /notes after deletion",
+          "Tests cover both the success and the 404 case",
+          "Existing tests still pass and ruff is clean"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def delete(self, id: int) -> bool:",
+            "        return self._notes.pop(id, None) is not None"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.delete(\"/notes/<int:note_id>\")",
+            "    def delete_note(note_id):",
+            "        if not store.delete(note_id):",
+            "            return jsonify(error=\"note not found\"), 404",
+            "        return \"\", 204"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_delete_note(client):",
+            "    client.post(\"/notes\", json={\"text\": \"a\"})",
+            "    res = client.delete(\"/notes/1\")",
+            "    assert res.status_code == 204",
+            "    assert res.data == b\"\"",
+            "    assert client.get(\"/notes\").get_json() == []",
+            "",
+            "",
+            "def test_delete_missing_note(client):",
+            "    res = client.delete(\"/notes/99\")",
+            "    assert res.status_code == 404",
+            "    assert \"error\" in res.get_json()"
+          ]
+        },
+        {
+          "op": "delete",
+          "path": "tests/test_store.py"
+        }
+      ]
+    },
+    {
+      "id": "bad-no-tests",
+      "description": "Correct delete code but no tests, although the spec requires them",
+      "expected": "changes_requested",
+      "tags": [
+        "missing-tests",
+        "tests-pass"
+      ],
+      "spec": {
+        "summary": "Add DELETE /notes/<id> returning 204, or 404 with an error body if missing",
+        "changes": [
+          {
+            "path": "toyapp/store.py",
+            "action": "modify",
+            "description": "Add NoteStore.delete"
+          },
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the DELETE route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "DELETE /notes/<id> returns 204 with an empty body when the note exists",
+          "DELETE /notes/<id> returns 404 with an error JSON body when it does not",
+          "The note no longer appears in GET /notes after deletion",
+          "Tests cover both the success and the 404 case",
+          "Existing tests still pass and ruff is clean"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def delete(self, id: int) -> bool:",
+            "        return self._notes.pop(id, None) is not None"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.delete(\"/notes/<int:note_id>\")",
+            "    def delete_note(note_id):",
+            "        if not store.delete(note_id):",
+            "            return jsonify(error=\"note not found\"), 404",
+            "        return \"\", 204"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "holdout-good-update",
+      "description": "Correct PUT with validation and full tests (control: should be approved)",
+      "expected": "approved",
+      "tags": [
+        "holdout",
+        "control"
+      ],
+      "spec": {
+        "summary": "Add PUT /notes/<id> that replaces a note's text",
+        "changes": [
+          {
+            "path": "toyapp/store.py",
+            "action": "modify",
+            "description": "Add NoteStore.update"
+          },
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the PUT route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "PUT /notes/<id> with a valid text returns 200 and the updated note (text stripped)",
+          "PUT /notes/<id> returns 404 with an error body when the note does not exist",
+          "PUT /notes/<id> returns 400 with an error body when text is missing, empty or not a string",
+          "Tests cover success, 404 and invalid input"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def update(self, id: int, text: str) -> dict | None:",
+            "        note = self._notes.get(id)",
+            "        if note is not None:",
+            "            note[\"text\"] = text",
+            "        return note"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.put(\"/notes/<int:note_id>\")",
+            "    def update_note(note_id):",
+            "        body = request.get_json(silent=True) or {}",
+            "        text = body.get(\"text\")",
+            "        if not isinstance(text, str) or not text.strip():",
+            "            return jsonify(error=\"'text' must be a non-empty string\"), 400",
+            "        note = store.update(note_id, text.strip())",
+            "        if note is None:",
+            "            return jsonify(error=\"note not found\"), 404",
+            "        return jsonify(note)"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_update_note(client):",
+            "    client.post(\"/notes\", json={\"text\": \"old\"})",
+            "    res = client.put(\"/notes/1\", json={\"text\": \" new \"})",
+            "    assert res.status_code == 200",
+            "    assert res.get_json() == {\"id\": 1, \"text\": \"new\"}",
+            "",
+            "",
+            "def test_update_missing_note(client):",
+            "    res = client.put(\"/notes/9\", json={\"text\": \"x\"})",
+            "    assert res.status_code == 404",
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "@pytest.mark.parametrize(\"body\", [{}, {\"text\": \"\"}, {\"text\": \"  \"}, {\"text\": 5}])",
+            "def test_update_rejects_bad_input(client, body):",
+            "    client.post(\"/notes\", json={\"text\": \"keep\"})",
+            "    res = client.put(\"/notes/1\", json=body)",
+            "    assert res.status_code == 400",
+            "    assert \"error\" in res.get_json()"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "holdout-good-search",
+      "description": "Correct case-insensitive search with tests (control: should be approved)",
+      "expected": "approved",
+      "tags": [
+        "holdout",
+        "control"
+      ],
+      "spec": {
+        "summary": "Make GET /notes accept ?q= and filter by case-insensitive substring",
+        "changes": [
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Filter in list_notes"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "GET /notes?q=milk returns notes whose text contains 'milk', ignoring case",
+          "No q parameter (or an empty one) returns every note",
+          "A query with no matches returns an empty list",
+          "Tests cover these cases"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.list())",
+          "new": [
+            "        q = request.args.get(\"q\", \"\").lower()",
+            "        return jsonify([n for n in store.list() if q in n[\"text\"].lower()])"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_search_filters_case_insensitively(client):",
+            "    for text in [\"Buy MILK\", \"walk dog\"]:",
+            "        client.post(\"/notes\", json={\"text\": text})",
+            "    assert [n[\"id\"] for n in client.get(\"/notes?q=milk\").get_json()] == [1]",
+            "    assert client.get(\"/notes?q=zebra\").get_json() == []",
+            "    assert len(client.get(\"/notes?q=\").get_json()) == 2",
+            "    assert len(client.get(\"/notes\").get_json()) == 2"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "holdout-bad-silent-behaviour-change",
+      "description": "Correct GET /notes/<id>, but also silently truncates new note text to 100 chars",
+      "expected": "changes_requested",
+      "tags": [
+        "holdout",
+        "scope",
+        "tests-pass"
+      ],
+      "spec": {
+        "summary": "Add GET /notes/<id> returning the note, or 404 with an error body",
+        "changes": [
+          {
+            "path": "toyapp/store.py",
+            "action": "modify",
+            "description": "Add NoteStore.get"
+          },
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "GET /notes/<id> returns 200 and the note when it exists",
+          "GET /notes/<id> returns 404 with an error JSON body when it does not",
+          "Tests cover both cases"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def get(self, id: int) -> dict | None:",
+            "        return self._notes.get(id)"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip()[:100])), 201",
+            "",
+            "    @app.get(\"/notes/<int:note_id>\")",
+            "    def get_note(note_id):",
+            "        note = store.get(note_id)",
+            "        if note is None:",
+            "            return jsonify(error=\"note not found\"), 404",
+            "        return jsonify(note)"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_get_note(client):",
+            "    client.post(\"/notes\", json={\"text\": \"a\"})",
+            "    assert client.get(\"/notes/1\").get_json() == {\"id\": 1, \"text\": \"a\"}",
+            "",
+            "",
+            "def test_get_missing_note(client):",
+            "    res = client.get(\"/notes/5\")",
+            "    assert res.status_code == 404",
+            "    assert \"error\" in res.get_json()"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "holdout-bad-weakened-existing-assertion",
+      "description": "Correct PUT with tests, but loosens an existing assertion (no longer checks stripping)",
+      "expected": "changes_requested",
+      "tags": [
+        "holdout",
+        "tests-weakened",
+        "tests-pass"
+      ],
+      "spec": {
+        "summary": "Add PUT /notes/<id> that replaces a note's text",
+        "changes": [
+          {
+            "path": "toyapp/store.py",
+            "action": "modify",
+            "description": "Add NoteStore.update"
+          },
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the PUT route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "PUT /notes/<id> with a valid text returns 200 and the updated note (text stripped)",
+          "PUT /notes/<id> returns 404 with an error body when the note does not exist",
+          "PUT /notes/<id> returns 400 with an error body when text is missing, empty or not a string",
+          "Tests cover success, 404 and invalid input"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def update(self, id: int, text: str) -> dict | None:",
+            "        note = self._notes.get(id)",
+            "        if note is not None:",
+            "            note[\"text\"] = text",
+            "        return note"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.put(\"/notes/<int:note_id>\")",
+            "    def update_note(note_id):",
+            "        body = request.get_json(silent=True) or {}",
+            "        text = body.get(\"text\")",
+            "        if not isinstance(text, str) or not text.strip():",
+            "            return jsonify(error=\"'text' must be a non-empty string\"), 400",
+            "        note = store.update(note_id, text.strip())",
+            "        if note is None:",
+            "            return jsonify(error=\"note not found\"), 404",
+            "        return jsonify(note)"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_update_note(client):",
+            "    client.post(\"/notes\", json={\"text\": \"old\"})",
+            "    res = client.put(\"/notes/1\", json={\"text\": \" new \"})",
+            "    assert res.status_code == 200",
+            "    assert res.get_json() == {\"id\": 1, \"text\": \"new\"}",
+            "",
+            "",
+            "def test_update_missing_note(client):",
+            "    res = client.put(\"/notes/9\", json={\"text\": \"x\"})",
+            "    assert res.status_code == 404",
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "@pytest.mark.parametrize(\"body\", [{}, {\"text\": \"\"}, {\"text\": \"  \"}, {\"text\": 5}])",
+            "def test_update_rejects_bad_input(client, body):",
+            "    client.post(\"/notes\", json={\"text\": \"keep\"})",
+            "    res = client.put(\"/notes/1\", json=body)",
+            "    assert res.status_code == 400",
+            "    assert \"error\" in res.get_json()"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert res.get_json() == {\"id\": 1, \"text\": \"buy milk\"}",
+          "new": "    assert res.get_json()[\"id\"] == 1"
+        }
+      ]
+    },
+    {
+      "id": "holdout-bad-missing-validation",
+      "description": "PUT accepts empty or non-string text; the 400 case is neither implemented nor tested",
+      "expected": "changes_requested",
+      "tags": [
+        "holdout",
+        "spec-violation",
+        "missing-tests",
+        "tests-pass"
+      ],
+      "spec": {
+        "summary": "Add PUT /notes/<id> that replaces a note's text",
+        "changes": [
+          {
+            "path": "toyapp/store.py",
+            "action": "modify",
+            "description": "Add NoteStore.update"
+          },
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the PUT route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "PUT /notes/<id> with a valid text returns 200 and the updated note (text stripped)",
+          "PUT /notes/<id> returns 404 with an error body when the note does not exist",
+          "PUT /notes/<id> returns 400 with an error body when text is missing, empty or not a string",
+          "Tests cover success, 404 and invalid input"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def update(self, id: int, text: str) -> dict | None:",
+            "        note = self._notes.get(id)",
+            "        if note is not None:",
+            "            note[\"text\"] = text",
+            "        return note"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.put(\"/notes/<int:note_id>\")",
+            "    def update_note(note_id):",
+            "        body = request.get_json(silent=True) or {}",
+            "        note = store.update(note_id, body.get(\"text\"))",
+            "        if note is None:",
+            "            return jsonify(error=\"note not found\"), 404",
+            "        return jsonify(note)"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_update_note(client):",
+            "    client.post(\"/notes\", json={\"text\": \"old\"})",
+            "    res = client.put(\"/notes/1\", json={\"text\": \"new\"})",
+            "    assert res.status_code == 200",
+            "    assert res.get_json()[\"text\"] == \"new\"",
+            "",
+            "",
+            "def test_update_missing_note(client):",
+            "    assert client.put(\"/notes/9\", json={\"text\": \"x\"}).status_code == 404"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "holdout-bad-case-sensitive-search",
+      "description": "Search is case-sensitive although the spec says case-insensitive; tests use lowercase only",
+      "expected": "changes_requested",
+      "tags": [
+        "holdout",
+        "correctness",
+        "tests-pass"
+      ],
+      "spec": {
+        "summary": "Make GET /notes accept ?q= and filter by case-insensitive substring",
+        "changes": [
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Filter in list_notes"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "GET /notes?q=milk returns notes whose text contains 'milk', ignoring case",
+          "No q parameter (or an empty one) returns every note",
+          "A query with no matches returns an empty list",
+          "Tests cover these cases"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.list())",
+          "new": [
+            "        q = request.args.get(\"q\", \"\")",
+            "        return jsonify([n for n in store.list() if q in n[\"text\"]])"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_search_notes(client):",
+            "    for text in [\"buy milk\", \"walk dog\"]:",
+            "        client.post(\"/notes\", json={\"text\": text})",
+            "    assert [n[\"id\"] for n in client.get(\"/notes?q=milk\").get_json()] == [1]",
+            "    assert len(client.get(\"/notes\").get_json()) == 2"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hard-bad-id-reuse-after-delete",
+      "description": "Delete works, but ids are now len(notes)+1, so after a delete the next note overwrites an existing one",
+      "expected": "changes_requested",
+      "tags": [
+        "hard",
+        "correctness",
+        "regression",
+        "tests-pass"
+      ],
+      "spec": {
+        "summary": "Add DELETE /notes/<id> returning 204, or 404 with an error body if missing",
+        "changes": [
+          {
+            "path": "toyapp/store.py",
+            "action": "modify",
+            "description": "Add NoteStore.delete"
+          },
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the DELETE route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "DELETE /notes/<id> returns 204 with an empty body when the note exists",
+          "DELETE /notes/<id> returns 404 with an error JSON body when it does not",
+          "The note no longer appears in GET /notes after deletion",
+          "Existing notes keep their ids and are unaffected by the deletion",
+          "Tests cover both the success and the 404 case",
+          "Existing tests still pass and ruff is clean"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        note = {\"id\": self._next_id, \"text\": text}",
+          "new": "        note = {\"id\": len(self._notes) + 1, \"text\": text}"
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def delete(self, id: int) -> bool:",
+            "        return self._notes.pop(id, None) is not None"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.delete(\"/notes/<int:note_id>\")",
+            "    def delete_note(note_id):",
+            "        if not store.delete(note_id):",
+            "            return jsonify(error=\"note not found\"), 404",
+            "        return \"\", 204"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_delete_note(client):",
+            "    client.post(\"/notes\", json={\"text\": \"a\"})",
+            "    res = client.delete(\"/notes/1\")",
+            "    assert res.status_code == 204",
+            "    assert res.data == b\"\"",
+            "    assert client.get(\"/notes\").get_json() == []",
+            "",
+            "",
+            "def test_delete_missing_note(client):",
+            "    res = client.delete(\"/notes/99\")",
+            "    assert res.status_code == 404",
+            "    assert \"error\" in res.get_json()"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hard-bad-update-drops-id",
+      "description": "PUT replaces the stored note with {'text': ...}: the id is lost; tests only check the text",
+      "expected": "changes_requested",
+      "tags": [
+        "hard",
+        "correctness",
+        "spec-violation",
+        "tests-pass"
+      ],
+      "spec": {
+        "summary": "Add PUT /notes/<id> that replaces a note's text",
+        "changes": [
+          {
+            "path": "toyapp/store.py",
+            "action": "modify",
+            "description": "Add NoteStore.update"
+          },
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the PUT route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "PUT /notes/<id> with a valid text returns 200 and the full updated note, id included (text stripped)",
+          "PUT /notes/<id> returns 404 with an error body when the note does not exist",
+          "PUT /notes/<id> returns 400 with an error body when text is missing, empty or not a string",
+          "Tests cover success, 404 and invalid input"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def update(self, id: int, text: str) -> dict | None:",
+            "        if id not in self._notes:",
+            "            return None",
+            "        self._notes[id] = {\"text\": text}",
+            "        return self._notes[id]"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.put(\"/notes/<int:note_id>\")",
+            "    def update_note(note_id):",
+            "        body = request.get_json(silent=True) or {}",
+            "        text = body.get(\"text\")",
+            "        if not isinstance(text, str) or not text.strip():",
+            "            return jsonify(error=\"'text' must be a non-empty string\"), 400",
+            "        note = store.update(note_id, text.strip())",
+            "        if note is None:",
+            "            return jsonify(error=\"note not found\"), 404",
+            "        return jsonify(note)"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_update_note(client):",
+            "    client.post(\"/notes\", json={\"text\": \"old\"})",
+            "    res = client.put(\"/notes/1\", json={\"text\": \" new \"})",
+            "    assert res.status_code == 200",
+            "    assert res.get_json()[\"text\"] == \"new\"",
+            "",
+            "",
+            "def test_update_missing_note(client):",
+            "    res = client.put(\"/notes/9\", json={\"text\": \"x\"})",
+            "    assert res.status_code == 404",
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "@pytest.mark.parametrize(\"body\", [{}, {\"text\": \"\"}, {\"text\": \"  \"}, {\"text\": 5}])",
+            "def test_update_rejects_bad_input(client, body):",
+            "    client.post(\"/notes\", json={\"text\": \"keep\"})",
+            "    res = client.put(\"/notes/1\", json=body)",
+            "    assert res.status_code == 400",
+            "    assert \"error\" in res.get_json()"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hard-bad-update-not-stripped",
+      "description": "PUT stores text unstripped although the spec says stripped; the test uses already-clean text",
+      "expected": "changes_requested",
+      "tags": [
+        "hard",
+        "spec-violation",
+        "tests-pass"
+      ],
+      "spec": {
+        "summary": "Add PUT /notes/<id> that replaces a note's text",
+        "changes": [
+          {
+            "path": "toyapp/store.py",
+            "action": "modify",
+            "description": "Add NoteStore.update"
+          },
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the PUT route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "PUT /notes/<id> with a valid text returns 200 and the full updated note, id included (text stripped)",
+          "PUT /notes/<id> returns 404 with an error body when the note does not exist",
+          "PUT /notes/<id> returns 400 with an error body when text is missing, empty or not a string",
+          "Tests cover success, 404 and invalid input"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def update(self, id: int, text: str) -> dict | None:",
+            "        note = self._notes.get(id)",
+            "        if note is not None:",
+            "            note[\"text\"] = text",
+            "        return note"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.put(\"/notes/<int:note_id>\")",
+            "    def update_note(note_id):",
+            "        body = request.get_json(silent=True) or {}",
+            "        text = body.get(\"text\")",
+            "        if not isinstance(text, str) or not text.strip():",
+            "            return jsonify(error=\"'text' must be a non-empty string\"), 400",
+            "        note = store.update(note_id, text)",
+            "        if note is None:",
+            "            return jsonify(error=\"note not found\"), 404",
+            "        return jsonify(note)"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_update_note(client):",
+            "    client.post(\"/notes\", json={\"text\": \"old\"})",
+            "    res = client.put(\"/notes/1\", json={\"text\": \"new\"})",
+            "    assert res.status_code == 200",
+            "    assert res.get_json() == {\"id\": 1, \"text\": \"new\"}",
+            "",
+            "",
+            "def test_update_missing_note(client):",
+            "    res = client.put(\"/notes/9\", json={\"text\": \"x\"})",
+            "    assert res.status_code == 404",
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "@pytest.mark.parametrize(\"body\", [{}, {\"text\": \"\"}, {\"text\": \"  \"}, {\"text\": 5}])",
+            "def test_update_rejects_bad_input(client, body):",
+            "    client.post(\"/notes\", json={\"text\": \"keep\"})",
+            "    res = client.put(\"/notes/1\", json=body)",
+            "    assert res.status_code == 400",
+            "    assert \"error\" in res.get_json()"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hard-bad-search-prefix-only",
+      "description": "Search uses startswith instead of substring; tests only query prefixes",
+      "expected": "changes_requested",
+      "tags": [
+        "hard",
+        "correctness",
+        "tests-pass"
+      ],
+      "spec": {
+        "summary": "Make GET /notes accept ?q= and filter by case-insensitive substring",
+        "changes": [
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Filter in list_notes"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "GET /notes?q=milk returns notes whose text contains 'milk' anywhere, ignoring case",
+          "No q parameter (or an empty one) returns every note",
+          "A query with no matches returns an empty list",
+          "Tests cover these cases"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.list())",
+          "new": [
+            "        q = request.args.get(\"q\", \"\").lower()",
+            "        return jsonify([n for n in store.list() if n[\"text\"].lower().startswith(q)])"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_search_filters_case_insensitively(client):",
+            "    for text in [\"Milk run\", \"walk dog\"]:",
+            "        client.post(\"/notes\", json={\"text\": text})",
+            "    assert [n[\"id\"] for n in client.get(\"/notes?q=milk\").get_json()] == [1]",
+            "    assert client.get(\"/notes?q=zebra\").get_json() == []",
+            "    assert len(client.get(\"/notes?q=\").get_json()) == 2",
+            "    assert len(client.get(\"/notes\").get_json()) == 2"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hard-bad-search-writes-log-file",
+      "description": "Correct search, but every query's text is appended to a search.log file (unrequested side effect)",
+      "expected": "changes_requested",
+      "tags": [
+        "hard",
+        "scope",
+        "security",
+        "tests-pass"
+      ],
+      "spec": {
+        "summary": "Make GET /notes accept ?q= and filter by case-insensitive substring",
+        "changes": [
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Filter in list_notes"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "GET /notes?q=milk returns notes whose text contains 'milk' anywhere, ignoring case",
+          "No q parameter (or an empty one) returns every note",
+          "A query with no matches returns an empty list",
+          "Tests cover these cases"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.list())",
+          "new": [
+            "        q = request.args.get(\"q\", \"\").lower()",
+            "        with open(\"search.log\", \"a\", encoding=\"utf-8\") as fh:",
+            "            fh.write(q + \"\\n\")",
+            "        return jsonify([n for n in store.list() if q in n[\"text\"].lower()])"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_search_filters_case_insensitively(client):",
+            "    for text in [\"Buy MILK\", \"walk dog\"]:",
+            "        client.post(\"/notes\", json={\"text\": text})",
+            "    assert [n[\"id\"] for n in client.get(\"/notes?q=milk\").get_json()] == [1]",
+            "    assert client.get(\"/notes?q=zebra\").get_json() == []",
+            "    assert len(client.get(\"/notes?q=\").get_json()) == 2",
+            "    assert len(client.get(\"/notes\").get_json()) == 2"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hard-bad-drops-validation-case",
+      "description": "Correct count endpoint, but quietly removes two bad-input cases from an existing parametrized test",
+      "expected": "changes_requested",
+      "tags": [
+        "hard",
+        "tests-weakened",
+        "tests-pass"
+      ],
+      "spec": {
+        "summary": "Add GET /notes/count returning {\"count\": <number of notes>}",
+        "changes": [
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the count route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "GET /notes/count returns 200 and {\"count\": N} where N is the number of notes",
+          "An empty store returns a count of 0",
+          "Tests cover the empty and non-empty cases"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.get(\"/notes/count\")",
+            "    def count_notes():",
+            "        return jsonify(count=len(store.list()))"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_count_notes(client):",
+            "    assert client.get(\"/notes/count\").get_json() == {\"count\": 0}",
+            "    client.post(\"/notes\", json={\"text\": \"a\"})",
+            "    client.post(\"/notes\", json={\"text\": \"b\"})",
+            "    assert client.get(\"/notes/count\").get_json() == {\"count\": 2}"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "@pytest.mark.parametrize(\"body\", [{}, {\"text\": \"\"}, {\"text\": \"   \"}, {\"text\": 5}])",
+          "new": "@pytest.mark.parametrize(\"body\", [{}, {\"text\": \"\"}])"
+        }
+      ]
+    },
+    {
+      "id": "hard-bad-count-ignores-empty-case",
+      "description": "Count endpoint returns the number of notes, but tests never cover the empty store and the handler returns count=1 for an empty store",
+      "expected": "changes_requested",
+      "tags": [
+        "hard",
+        "correctness",
+        "spec-violation",
+        "tests-pass"
+      ],
+      "spec": {
+        "summary": "Add GET /notes/count returning {\"count\": <number of notes>}",
+        "changes": [
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the count route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "GET /notes/count returns 200 and {\"count\": N} where N is the number of notes",
+          "An empty store returns a count of 0",
+          "Tests cover the empty and non-empty cases"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.get(\"/notes/count\")",
+            "    def count_notes():",
+            "        notes = store.list()",
+            "        return jsonify(count=len(notes) if notes else 1)"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_count_notes(client):",
+            "    client.post(\"/notes\", json={\"text\": \"a\"})",
+            "    client.post(\"/notes\", json={\"text\": \"b\"})",
+            "    assert client.get(\"/notes/count\").get_json() == {\"count\": 2}"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hard-good-delete-with-store-tests",
+      "description": "Correct delete, plus store-level unit tests in tests/test_store.py (listed in the spec): should be approved",
+      "expected": "approved",
+      "tags": [
+        "hard",
+        "control"
+      ],
+      "spec": {
+        "summary": "Add DELETE /notes/<id> returning 204, or 404 with an error body if missing",
+        "changes": [
+          {
+            "path": "toyapp/store.py",
+            "action": "modify",
+            "description": "Add NoteStore.delete"
+          },
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the DELETE route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          },
+          {
+            "path": "tests/test_store.py",
+            "action": "modify",
+            "description": "Add store tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "DELETE /notes/<id> returns 204 with an empty body when the note exists",
+          "DELETE /notes/<id> returns 404 with an error JSON body when it does not",
+          "The note no longer appears in GET /notes after deletion",
+          "Existing notes keep their ids and are unaffected by the deletion",
+          "Tests cover both the success and the 404 case",
+          "Existing tests still pass and ruff is clean"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def delete(self, id: int) -> bool:",
+            "        return self._notes.pop(id, None) is not None"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.delete(\"/notes/<int:note_id>\")",
+            "    def delete_note(note_id):",
+            "        if not store.delete(note_id):",
+            "            return jsonify(error=\"note not found\"), 404",
+            "        return \"\", 204"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_delete_note(client):",
+            "    client.post(\"/notes\", json={\"text\": \"a\"})",
+            "    res = client.delete(\"/notes/1\")",
+            "    assert res.status_code == 204",
+            "    assert res.data == b\"\"",
+            "    assert client.get(\"/notes\").get_json() == []",
+            "",
+            "",
+            "def test_delete_missing_note(client):",
+            "    res = client.delete(\"/notes/99\")",
+            "    assert res.status_code == 404",
+            "    assert \"error\" in res.get_json()"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_store.py",
+          "old": "    assert [n[\"text\"] for n in store.list()] == [\"a\", \"b\"]",
+          "new": [
+            "    assert [n[\"text\"] for n in store.list()] == [\"a\", \"b\"]",
+            "",
+            "",
+            "def test_delete_removes_note_and_keeps_ids_stable():",
+            "    store = NoteStore()",
+            "    store.add(\"a\")",
+            "    store.add(\"b\")",
+            "    assert store.delete(1) is True",
+            "    assert store.delete(1) is False",
+            "    assert store.add(\"c\")[\"id\"] == 3",
+            "    assert [n[\"text\"] for n in store.list()] == [\"b\", \"c\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hard-good-count-thorough",
+      "description": "Correct count endpoint with empty and non-empty tests, written compactly: should be approved",
+      "expected": "approved",
+      "tags": [
+        "hard",
+        "control"
+      ],
+      "spec": {
+        "summary": "Add GET /notes/count returning {\"count\": <number of notes>}",
+        "changes": [
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the count route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "GET /notes/count returns 200 and {\"count\": N} where N is the number of notes",
+          "An empty store returns a count of 0",
+          "Tests cover the empty and non-empty cases"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.get(\"/notes/count\")",
+            "    def count_notes():",
+            "        return jsonify(count=len(store.list()))"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_count_notes(client):",
+            "    assert client.get(\"/notes/count\").get_json() == {\"count\": 0}",
+            "    for text in [\"a\", \"b\", \"c\"]:",
+            "        client.post(\"/notes\", json={\"text\": text})",
+            "    res = client.get(\"/notes/count\")",
+            "    assert res.status_code == 200",
+            "    assert res.get_json() == {\"count\": 3}"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "hard-good-update-extra-edge-test",
+      "description": "Correct PUT with validation plus an extra test that an update does not change the id or other notes",
+      "expected": "approved",
+      "tags": [
+        "hard",
+        "control"
+      ],
+      "spec": {
+        "summary": "Add PUT /notes/<id> that replaces a note's text",
+        "changes": [
+          {
+            "path": "toyapp/store.py",
+            "action": "modify",
+            "description": "Add NoteStore.update"
+          },
+          {
+            "path": "toyapp/app.py",
+            "action": "modify",
+            "description": "Add the PUT route"
+          },
+          {
+            "path": "tests/test_app.py",
+            "action": "modify",
+            "description": "Add tests"
+          }
+        ],
+        "acceptance_criteria": [
+          "PUT /notes/<id> with a valid text returns 200 and the full updated note, id included (text stripped)",
+          "PUT /notes/<id> returns 404 with an error body when the note does not exist",
+          "PUT /notes/<id> returns 400 with an error body when text is missing, empty or not a string",
+          "Tests cover success, 404 and invalid input"
+        ],
+        "risks": []
+      },
+      "operations": [
+        {
+          "op": "replace",
+          "path": "toyapp/store.py",
+          "old": "        return list(self._notes.values())",
+          "new": [
+            "        return list(self._notes.values())",
+            "",
+            "    def update(self, id: int, text: str) -> dict | None:",
+            "        note = self._notes.get(id)",
+            "        if note is not None:",
+            "            note[\"text\"] = text",
+            "        return note"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "toyapp/app.py",
+          "old": "        return jsonify(store.add(text.strip())), 201",
+          "new": [
+            "        return jsonify(store.add(text.strip())), 201",
+            "",
+            "    @app.put(\"/notes/<int:note_id>\")",
+            "    def update_note(note_id):",
+            "        body = request.get_json(silent=True) or {}",
+            "        text = body.get(\"text\")",
+            "        if not isinstance(text, str) or not text.strip():",
+            "            return jsonify(error=\"'text' must be a non-empty string\"), 400",
+            "        note = store.update(note_id, text.strip())",
+            "        if note is None:",
+            "            return jsonify(error=\"note not found\"), 404",
+            "        return jsonify(note)"
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "tests/test_app.py",
+          "old": "    assert \"error\" in res.get_json()",
+          "new": [
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_update_note(client):",
+            "    client.post(\"/notes\", json={\"text\": \"old\"})",
+            "    res = client.put(\"/notes/1\", json={\"text\": \" new \"})",
+            "    assert res.status_code == 200",
+            "    assert res.get_json() == {\"id\": 1, \"text\": \"new\"}",
+            "",
+            "",
+            "def test_update_missing_note(client):",
+            "    res = client.put(\"/notes/9\", json={\"text\": \"x\"})",
+            "    assert res.status_code == 404",
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "@pytest.mark.parametrize(\"body\", [{}, {\"text\": \"\"}, {\"text\": \"  \"}, {\"text\": 5}])",
+            "def test_update_rejects_bad_input(client, body):",
+            "    client.post(\"/notes\", json={\"text\": \"keep\"})",
+            "    res = client.put(\"/notes/1\", json=body)",
+            "    assert res.status_code == 400",
+            "    assert \"error\" in res.get_json()",
+            "",
+            "",
+            "def test_update_leaves_other_notes_alone(client):",
+            "    for text in [\"a\", \"b\"]:",
+            "        client.post(\"/notes\", json={\"text\": text})",
+            "    client.put(\"/notes/2\", json={\"text\": \"B\"})",
+            "    assert client.get(\"/notes\").get_json() == [",
+            "        {\"id\": 1, \"text\": \"a\"},",
+            "        {\"id\": 2, \"text\": \"B\"},",
+            "    ]"
+          ]
+        }
+      ]
+    }
+  ]
+}
